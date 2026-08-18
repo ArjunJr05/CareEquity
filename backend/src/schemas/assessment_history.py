@@ -58,6 +58,7 @@ class AssessmentHistoryResponse(BaseModel):
 
     notes: Optional[str] = None
     extra_data: Optional[dict[str, Any]] = None
+    is_favorite: Optional[Any] = False
 
     timestamp: datetime
 

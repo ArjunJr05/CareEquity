@@ -11,6 +11,17 @@ from .api.routes import patients, auth, admin, history
 # Create tables in the CareEquity database if they don't exist
 Base.metadata.create_all(bind=engine)
 
+# Auto-migration helper for existing tables
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        conn.execute(text("ALTER TABLE assessment_history ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm FLOAT DEFAULT 170.0;"))
+        conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS weight_kg FLOAT DEFAULT 70.0;"))
+        conn.commit()
+except Exception as migration_err:
+    print("Auto migration note:", migration_err)
+
 app = FastAPI(
     title="CareEquity Backend API",
     description="FastAPI service for CareEquity SDOH Integration Platform",
