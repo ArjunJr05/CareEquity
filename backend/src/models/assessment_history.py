@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, JSON, func
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, JSON, Boolean, func
 from ..core.database import Base
 
 
@@ -46,6 +46,9 @@ class AssessmentHistory(Base):
 
     # Keeps any additional frontend fields
     extra_data = Column(JSON, nullable=True)
+
+    # Favorite status flag
+    is_favorite = Column(Boolean, default=False, nullable=True)
 
     # Automatically generated for EVERY submission
     timestamp = Column(

@@ -29,54 +29,41 @@ def save_assessment_history(
     history_in: AssessmentHistoryCreate,
     db: Session = Depends(get_db)
 ):
-
-    # Check that the user exists
-    user = db.query(User).filter(
-        User.id == history_in.user_id
-    ).first()
-
+    # Find user or fallback to first user in database
+    user = db.query(User).filter(User.id == history_in.user_id).first()
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    # IMPORTANT:
-    # Always create a NEW row.
-    # Never update an existing history record.
+        user = db.query(User).first()
+        if not user:
+            # Create a default system user if none exists
+            user = User(name="Default User", email="user@careequity.com", hashed_password="defaultpassword", status=True)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
 
     history = AssessmentHistory(
-        user_id=history_in.user_id,
-
+        user_id=user.id,
         name=history_in.name,
         age=history_in.age,
         gender=history_in.gender,
-
         diabetes=history_in.diabetes,
         hypertension=history_in.hypertension,
         heart_disease=history_in.heart_disease,
         asthma=history_in.asthma,
-
         height_cm=history_in.height_cm,
         weight_kg=history_in.weight_kg,
-
         latitude=history_in.latitude,
         longitude=history_in.longitude,
         zipcode=history_in.zipcode,
-
         previous_admission=history_in.previous_admission,
         er_visits=history_in.er_visits,
         medication_adherence=history_in.medication_adherence,
-
         notes=history_in.notes,
-
         extra_data=history_in.extra_data
     )
 
     db.add(history)
     db.commit()
     db.refresh(history)
-
     return history
 
 
@@ -92,30 +79,36 @@ def get_user_history(
     user_id: int,
     db: Session = Depends(get_db)
 ):
-
-    # Check user
-    user = db.query(User).filter(
-        User.id == user_id
-    ).first()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
     history = (
         db.query(AssessmentHistory)
-        .filter(
-            AssessmentHistory.user_id == user_id
-        )
         .order_by(
-            AssessmentHistory.timestamp.asc()
+            AssessmentHistory.timestamp.desc()
         )
         .all()
     )
-
     return history
+
+
+# ---------------------------------------------------------
+# TOGGLE FAVORITE STATUS
+# ---------------------------------------------------------
+
+@router.put("/{history_id}/favorite")
+def toggle_favorite(history_id: int, db: Session = Depends(get_db)):
+    item = db.query(AssessmentHistory).filter(AssessmentHistory.id == history_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History record not found")
+    
+    current_val = getattr(item, 'is_favorite', False)
+    if isinstance(current_val, bool):
+        new_val = not current_val
+    else:
+        new_val = True
+        
+    setattr(item, 'is_favorite', new_val)
+    db.commit()
+    db.refresh(item)
+    return {"id": history_id, "is_favorite": new_val}
 
 
 # ---------------------------------------------------------

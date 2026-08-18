@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
 import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from '../store/appState'
@@ -39,14 +39,117 @@ const handleLogout = async () => {
   setLoggedIn(false)
 }
 
+// Assessment History State
+const userHistory = ref([])
+const isLoadingHistory = ref(false)
+const activeHistoryTab = ref('recent')
+
+const fetchUserHistory = async () => {
+  isLoadingHistory.value = true
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/history/user/1`)
+    if (res.ok) {
+      const data = await res.json()
+      userHistory.value = data
+    }
+  } catch (err) {
+    console.error('Error fetching history:', err)
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
+const toggleFavoriteItem = async (item) => {
+  // Toggle locally immediately for instant feedback
+  item.is_favorite = !item.is_favorite
+  try {
+    await fetch(`${MAIN_BACKEND_URL}/api/history/${item.id}/favorite`, {
+      method: 'PUT'
+    })
+  } catch (err) {
+    console.error('Failed toggling favorite state on backend:', err)
+  }
+}
+
+const displayedHistory = computed(() => {
+  if (activeHistoryTab.value === 'favorites') {
+    return userHistory.value.filter(i => !!i.is_favorite)
+  }
+  return userHistory.value
+})
+
+onMounted(() => {
+  fetchUserHistory()
+})
+
+const formatDate = (isoStr) => {
+  if (!isoStr) return 'Recently'
+  const d = new Date(isoStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+const downloadHistoryItem = (item) => {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(item, null, 2))
+  const downloadAnchor = document.createElement('a')
+  downloadAnchor.setAttribute("href", dataStr)
+  downloadAnchor.setAttribute("download", `patient_assessment_${item.name || item.id || 'record'}.json`)
+  document.body.appendChild(downloadAnchor)
+  downloadAnchor.click()
+  downloadAnchor.remove()
+}
+
 // Form states
 const activeTab = ref('file') // 'file' or 'connect'
+const selectedTemplate = ref(null) // null, 'upload', 'mychart', 'apple', 'google', 'samsung'
 const fileName = ref('')
 const fileSize = ref('')
 const isDragOver = ref(false)
 
+// Custom Toast Banner State
+const toast = ref({
+  visible: false,
+  title: 'Oops!',
+  message: ''
+})
+let toastTimer = null
+
+const showToast = (title, message) => {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.value = { visible: true, title, message }
+  toastTimer = setTimeout(() => {
+    toast.value.visible = false
+  }, 5000)
+}
+
+const hideToast = () => {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.value.visible = false
+}
+
+const templates = [
+  { id: 'upload', title: 'Upload File / Manual', subtitle: 'Upload patient clinical record', icon: '/assets/upload.png'},
+  { id: 'mychart', title: 'MyChart', subtitle: 'Epic EHR integration', icon: '/assets/mychart_logo.png'},
+  { id: 'apple', title: 'Apple Health', subtitle: 'iOS health metrics', icon: '/assets/ios_health.png'},
+  { id: 'google', title: 'Google Fit', subtitle: 'Android health data', icon: '/assets/google_health.png' },
+  { id: 'samsung', title: 'Samsung Health', subtitle: 'Galaxy health sync', icon: '/assets/samsang_health.png'}
+]
+
+const selectTemplate = (tplId) => {
+  if (selectedTemplate.value === tplId) {
+    selectedTemplate.value = null
+    return
+  }
+  
+  if (tplId === 'upload') {
+    selectedTemplate.value = 'upload'
+  } else {
+    // Show coming soon toast message without selecting/highlighting card outline
+    handleAppClick(templates.find(t => t.id === tplId)?.title || tplId)
+  }
+}
+
 const handleAppClick = (appName) => {
-  alert(`${appName} integration is coming in a future update! Please use the "Upload File" tab to parse patient data.`)
+  showToast('Oops!', `${appName} integration coming soon! Use "Upload File / Manual" to process records.`)
 }
 
 const form = ref({
@@ -57,13 +160,35 @@ const form = ref({
   hypertension: 'No',
   heart_disease: 'No',
   asthma: 'No',
-  country: 'United States',
-  state: 'Kansas',
-  county: 'Trego County',
+  locations: [
+    { country: 'United States', state: 'Kansas', county: 'Trego County' }
+  ],
   height_cm: 170,
   weight_kg: 70,
   notes: ''
 })
+
+const addLocation = () => {
+  if (form.value.locations.length < 5) {
+    form.value.locations.push({
+      country: 'United States',
+      state: 'Ohio',
+      county: US_COUNTIES_BY_STATE['Ohio'] ? US_COUNTIES_BY_STATE['Ohio'][0] : 'Cuyahoga County'
+    })
+  } else {
+    showToast('Limit Reached', 'You can add a maximum of 5 locations.')
+  }
+}
+
+const removeLocation = (index) => {
+  if (form.value.locations.length > 1) {
+    form.value.locations.splice(index, 1)
+  }
+}
+
+const getCountiesForState = (stateName) => {
+  return US_COUNTIES_BY_STATE[stateName] || ['Default County']
+}
 
 const availableCounties = computed(() => {
   return US_COUNTIES_BY_STATE[form.value.state] || []
@@ -246,13 +371,13 @@ const handleAnalyze = async () => {
   // Validate
   errors.value.name = !form.value.name
   errors.value.age = !form.value.age
-  errors.value.country = !form.value.country
-  errors.value.state = !form.value.state
-  errors.value.county = !form.value.county
   errors.value.height_cm = !form.value.height_cm || form.value.height_cm <= 0
   errors.value.weight_kg = !form.value.weight_kg || form.value.weight_kg <= 0
 
-  if (errors.value.name || errors.value.age || errors.value.country || errors.value.state || errors.value.county || errors.value.height_cm || errors.value.weight_kg) {
+  const hasInvalidLocation = !form.value.locations || form.value.locations.length === 0 || form.value.locations.some(loc => !loc.country || !loc.state || !loc.county)
+
+  if (errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg || hasInvalidLocation) {
+    showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and Location details.')
     const firstErr = document.querySelector('.form-field.error')
     if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
@@ -303,6 +428,46 @@ const handleAnalyze = async () => {
       }
     } catch (error) {
       console.error('Failed connecting to backend database server:', error)
+    }
+
+    // Unconditionally save to /api/history/save database table
+    try {
+      const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
+      const historyPayload = {
+        user_id: 1,
+        name: form.value.name,
+        age: parseInt(form.value.age) || 45,
+        gender: form.value.gender,
+        diabetes: form.value.diabetes,
+        hypertension: form.value.hypertension,
+        heart_disease: form.value.heart_disease,
+        asthma: form.value.asthma,
+        height_cm: parseFloat(form.value.height_cm) || 170.0,
+        weight_kg: parseFloat(form.value.weight_kg) || 70.0,
+        latitude: 0.0,
+        longitude: 0.0,
+        zipcode: '44102',
+        previous_admission: 'No',
+        er_visits: 0,
+        medication_adherence: 85,
+        notes: form.value.notes || '',
+        extra_data: {
+          county: primaryLoc.county,
+          state: primaryLoc.state,
+          country: primaryLoc.country,
+          all_locations: form.value.locations,
+          saved_at: new Date().toISOString()
+        }
+      }
+
+      await fetch(`${MAIN_BACKEND_URL}/api/history/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(historyPayload)
+      })
+      await fetchUserHistory()
+    } catch (err) {
+      console.error('Failed saving to history table:', err)
     }
   })()
 
@@ -404,9 +569,55 @@ const handleAnalyze = async () => {
   })()
 
   // Execute all fetches in parallel
-  Promise.all([savePatientPromise, mlPredictionPromise, predictionModelPromise]).then(() => {
+  Promise.all([savePatientPromise, mlPredictionPromise, predictionModelPromise]).then(async () => {
     console.log('🏁 All DataSetup API calls completed!')
     apisCompleted = true
+
+    // Persist full report data to PostgreSQL if user is logged in
+    if (isLoggedIn.value) {
+      try {
+        const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
+        const historyPayload = {
+          user_id: 1,
+          name: form.value.name,
+          age: parseInt(form.value.age) || 45,
+          gender: form.value.gender,
+          diabetes: form.value.diabetes,
+          hypertension: form.value.hypertension,
+          heart_disease: form.value.heart_disease,
+          asthma: form.value.asthma,
+          height_cm: parseFloat(form.value.height_cm) || 170.0,
+          weight_kg: parseFloat(form.value.weight_kg) || 70.0,
+          latitude: 0.0,
+          longitude: 0.0,
+          zipcode: '44102',
+          previous_admission: 'No',
+          er_visits: 0,
+          medication_adherence: 85,
+          notes: form.value.notes || '',
+          extra_data: {
+            county: primaryLoc.county,
+            state: primaryLoc.state,
+            country: primaryLoc.country,
+            all_locations: form.value.locations,
+            ml_prediction: mlPredictionResults.value,
+            prediction_model: predictionModelResults.value,
+            saved_at: new Date().toISOString()
+          }
+        }
+
+        await fetch(`${MAIN_BACKEND_URL}/api/history/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(historyPayload)
+        })
+        fetchUserHistory()
+      } catch (err) {
+        console.error('Failed saving complete report history to PostgreSQL:', err)
+      }
+    } else {
+      console.log('User is logged out: Assessment history not saved to database.')
+    }
   })
 
   // Loading bar animation sequence
@@ -461,6 +672,33 @@ const handleAnalyze = async () => {
         </ul>
       </article>
     </div>
+
+    <!-- Custom Pop-Up Toast Modal (Single Line Banner, Auto-close 5s) -->
+    <transition name="toast-fade">
+      <div v-if="toast.visible" class="custom-toast-overlay" style="position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 99999; display: flex; justify-content: center; pointer-events: auto;">
+        <div class="custom-toast-box" style="background: #ffffff; border-radius: 50px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); padding: 8px 16px 8px 10px; border: 1.5px solid #fee2e2; border-bottom: 3px solid #ef4444; display: flex; align-items: center; gap: 10px; white-space: nowrap; max-width: 90vw;">
+          <!-- Red Circle with X Icon -->
+          <div style="width: 28px; height: 28px; border-radius: 50%; background: #fee2e2; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </div>
+          <!-- Title & Message Text in Single Line -->
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <strong style="font-size: 0.85rem; font-weight: 800; color: #1e293b;">{{ toast.title }}</strong>
+            <span style="font-size: 0.82rem; color: #475569; font-weight: 500;">{{ toast.message }}</span>
+          </div>
+          <!-- Close Button -->
+          <button @click="hideToast" style="background: transparent; border: none; cursor: pointer; color: #94a3b8; padding: 2px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-left: 6px;" onmouseenter="this.style.color='#475569'" onmouseleave="this.style.color='#94a3b8'">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </transition>
 
     <!-- Top Full Width App Bar -->
     <header class="app-bar">
@@ -535,207 +773,340 @@ const handleAnalyze = async () => {
       <!-- 2. Center Content panel -->
       <main class="center-content-panel">
         <div class="center-panel-wrapper">
-          <!-- Header row with title on left and upload/connect tabs on right -->
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
-            <div>
-              <h2 style="margin: 0; font-size: 1.2rem; font-weight: 800; color: var(--text-primary);">Tell us more about your data</h2>
-              <p class="form-sub" style="margin: 4px 0 0; font-size: 0.76rem; color: var(--text-secondary);">This helps our AI provide more accurate analysis.</p>
-            </div>
-            <!-- Upload File / Connect capsule tabs -->
-            <div class="tabs-wrapper" style="margin-bottom: 0;">
-              <button class="tab-btn" :class="{ active: activeTab === 'file' }" @click="activeTab = 'file'">Upload File</button>
-              <button class="tab-btn tab-btn-lock" :class="{ active: activeTab === 'connect' }" @click="activeTab = 'connect'">
-                <IconBase name="lock" :size="12" style="margin-right: 4px;" /> Connect Data Source
-              </button>
+          <div style="margin-bottom: 20px;">
+            <h2 style="margin: 0; font-size: 1.25rem; font-weight: 800; color: var(--text-primary);">Select Data Source Template</h2>
+            <p class="form-sub" style="margin: 4px 0 0; font-size: 0.78rem; color: var(--text-secondary);">Choose a source below to open the data entry form, or view your history below.</p>
+          </div>
+
+          <!-- Template Cards Grid (Excel-like equal 5 boxes grid layout) -->
+          <div class="templates-cards-grid" style="display: flex; gap: 14px; margin-bottom: 24px; width: 100%;">
+            <div 
+              v-for="tpl in templates" 
+              :key="tpl.id" 
+              class="tpl-card-item"
+              :class="{ active: selectedTemplate === tpl.id }"
+              @click="selectTemplate(tpl.id)"
+              style="flex: 1; min-width: 0; cursor: pointer; transition: transform 0.15s ease;"
+            >
+              <!-- Card Top Preview Box (Excel-like rectangular thumbnail box) -->
+              <div 
+                class="tpl-card-box"
+                style="height: 100px; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 14px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); transition: all 0.2s ease;"
+                :style="selectedTemplate === tpl.id ? { borderColor: '#6366f1', boxShadow: '0 0 0 2px rgba(99, 102, 241, 0.25)', background: '#faf5ff' } : {}"
+              >
+                <img :src="tpl.icon" :alt="tpl.title" style="height: 44px; width: 44px; object-fit: contain;" />
+              </div>
+              <!-- Title & Subtitle Below Preview Box -->
+              <h4 style="margin: 0 0 2px; font-size: 0.8rem; font-weight: 700; color: var(--text-primary); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ tpl.title }}</h4>
+              <p style="margin: 0; font-size: 0.7rem; color: var(--text-secondary); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ tpl.subtitle }}</p>
             </div>
           </div>
 
-          <!-- File Upload Card -->
-          <div v-if="activeTab === 'file'" class="card upload-card" :class="{ dragover: isDragOver }" @dragover.prevent="onDragOver" @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
-            <div v-if="isUploadingFile" class="upload-loading-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.9); z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border-radius: inherit;">
-              <div class="ocr-spinner" style="width: 32px; height: 32px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spinner-rotate 0.8s linear infinite;"></div>
-              <p style="font-weight: 600; color: #4f46e5; margin: 0; font-size: 0.9rem;">Extracting patient data with OCR AI...</p>
-            </div>
-            <input type="file" ref="fileInput" class="hidden-input" accept=".pdf,.doc,.docx" @change="onFileChange" />
+          <!-- File Upload & Data Form Card (Revealed when Upload File / Manual is selected) -->
+          <div v-if="selectedTemplate === 'upload'">
             
-            <div class="upload-content">
-              <div class="upload-icon-circle">
-                <img src="/assets/upload.png" alt="Upload Icon" class="upload-img-icon" />
+
+            <div class="card upload-card" :class="{ dragover: isDragOver }" @dragover.prevent="onDragOver" @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
+              <div v-if="isUploadingFile" class="upload-loading-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.9); z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border-radius: inherit;">
+                <div class="ocr-spinner" style="width: 32px; height: 32px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spinner-rotate 0.8s linear infinite;"></div>
+                <p style="font-weight: 600; color: #4f46e5; margin: 0; font-size: 0.9rem;">Extracting patient data with OCR AI...</p>
               </div>
+              <input type="file" ref="fileInput" class="hidden-input" accept=".pdf,.doc,.docx" @change="onFileChange" />
               
-              <p v-if="!fileName" class="upload-text">Drag & drop your file here</p>
-              <p v-else class="upload-text selected-file">{{ fileName }} <span>({{ fileSize }})</span></p>
-              
-              <span v-if="!fileName" class="or-text">or</span>
-              
-              <button class="btn primary choose-btn" @click="triggerChooseFile">
-                {{ fileName ? 'Change File' : 'Choose File' }}
+              <div class="upload-content">
+                <div class="upload-icon-circle">
+                  <img src="/assets/upload.png" alt="Upload Icon" class="upload-img-icon" />
+                </div>
+                
+                <p v-if="!fileName" class="upload-text">Drag & drop your file here</p>
+                <p v-else class="upload-text selected-file">{{ fileName }} <span>({{ fileSize }})</span></p>
+                
+                <span v-if="!fileName" class="or-text">or</span>
+                
+                <button class="btn primary choose-btn" @click="triggerChooseFile">
+                  {{ fileName ? 'Change File' : 'Choose File' }}
+                </button>
+                
+                <p class="format-note">Supports PDF, Word files up to 200MB</p>
+              </div>
+            </div>
+          </div>
+          <!-- Patient Demographic Form & Analyze Button (Revealed when Upload File / Manual template is selected) -->
+          <div v-if="selectedTemplate === 'upload'">
+            <section class="form-section">
+              <div class="form-grid">
+                <!-- Patient Name -->
+                <div class="form-field" :class="{ error: errors.name }">
+                  <label>Name *</label>
+                  <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" />
+                  <span v-if="errors.name" class="err-msg">Name is required</span>
+                </div>
+
+                <!-- Age -->
+                <div class="form-field" :class="{ error: errors.age }">
+                  <label>Age *</label>
+                  <input type="number" v-model="form.age" placeholder="e.g., 54" class="setup-input" />
+                  <span v-if="errors.age" class="err-msg">Age is required</span>
+                </div>
+
+                <!-- Gender -->
+                <div class="form-field">
+                  <label>Gender *</label>
+                  <div class="select-wrapper">
+                    <select v-model="form.gender" class="setup-select">
+                      <option>Female</option>
+                      <option>Male</option>
+                      <option>Other</option>
+                    </select>
+                    <IconBase name="chevron-down" :size="13" class="chevron" />
+                  </div>
+                </div>
+
+                <!-- Diabetes -->
+                <div class="form-field">
+                  <label>Diabetes *</label>
+                  <div class="select-wrapper">
+                    <select v-model="form.diabetes" class="setup-select">
+                      <option>No</option>
+                      <option>Yes</option>
+                    </select>
+                    <IconBase name="chevron-down" :size="13" class="chevron" />
+                  </div>
+                </div>
+
+                <!-- Hypertension -->
+                <div class="form-field">
+                  <label>Hypertension *</label>
+                  <div class="select-wrapper">
+                    <select v-model="form.hypertension" class="setup-select">
+                      <option>No</option>
+                      <option>Yes</option>
+                    </select>
+                    <IconBase name="chevron-down" :size="13" class="chevron" />
+                  </div>
+                </div>
+
+                <!-- Heart Disease -->
+                <div class="form-field">
+                  <label>Heart Disease *</label>
+                  <div class="select-wrapper">
+                    <select v-model="form.heart_disease" class="setup-select">
+                      <option>No</option>
+                      <option>Yes</option>
+                    </select>
+                    <IconBase name="chevron-down" :size="13" class="chevron" />
+                  </div>
+                </div>
+
+                <!-- Asthma -->
+                <div class="form-field">
+                  <label>Asthma *</label>
+                  <div class="select-wrapper">
+                    <select v-model="form.asthma" class="setup-select">
+                      <option>No</option>
+                      <option>Yes</option>
+                    </select>
+                    <IconBase name="chevron-down" :size="13" class="chevron" />
+                  </div>
+                </div>
+
+                <!-- Height (cm) -->
+                <div class="form-field" :class="{ error: errors.height_cm }">
+                  <label>Height (cm) *</label>
+                  <input type="number" v-model="form.height_cm" placeholder="e.g., 170" class="setup-input" />
+                  <span v-if="errors.height_cm" class="err-msg">Height is required</span>
+                </div>
+
+                <!-- Weight (kg) -->
+                <div class="form-field" :class="{ error: errors.weight_kg }">
+                  <label>Weight (kg) *</label>
+                  <input type="number" v-model="form.weight_kg" placeholder="e.g., 70" class="setup-input" />
+                  <span v-if="errors.weight_kg" class="err-msg">Weight is required</span>
+                </div>
+
+              </div>
+
+              <!-- Dynamic Location Section (Up to 5 Locations) -->
+              <div style="margin-top: 20px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                    <IconBase name="location" :size="15" style="color: #4f46e5;" /> Target Locations (Max 5)
+                  </h4>
+                  <button 
+                    type="button" 
+                    @click="addLocation" 
+                    v-if="form.locations.length < 5"
+                    style="background: rgba(79, 70, 229, 0.08); border: 1px solid rgba(79, 70, 229, 0.2); color: #4f46e5; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 0.78rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; transition: all 0.15s ease;"
+                  >
+                    + Add Location 
+                  </button>
+                </div>
+
+                <div v-for="(loc, idx) in form.locations" :key="idx" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size: 0.78rem; font-weight: 700; color: #475569;">Location Entry #{{ idx + 1 }}</span>
+                    <button 
+                      type="button" 
+                      v-if="form.locations.length > 1"
+                      @click="removeLocation(idx)" 
+                      style="background: transparent; border: none; color: #ef4444; font-size: 0.75rem; font-weight: 600; cursor: pointer;"
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div class="form-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 0;">
+                    <!-- Country -->
+                    <div class="form-field">
+                      <label style="font-size: 0.75rem;">Country {{ idx + 1 }} *</label>
+                      <div class="select-wrapper">
+                        <select v-model="loc.country" class="setup-select">
+                          <option value="United States">United States</option>
+                        </select>
+                        <IconBase name="chevron-down" :size="13" class="chevron" />
+                      </div>
+                    </div>
+
+                    <!-- State -->
+                    <div class="form-field">
+                      <label style="font-size: 0.75rem;">State {{ idx + 1 }} *</label>
+                      <div class="select-wrapper">
+                        <select v-model="loc.state" class="setup-select">
+                          <option v-for="st in US_STATES" :key="st" :value="st">{{ st }}</option>
+                        </select>
+                        <IconBase name="chevron-down" :size="13" class="chevron" />
+                      </div>
+                    </div>
+
+                    <!-- County -->
+                    <div class="form-field">
+                      <label style="font-size: 0.75rem;">County {{ idx + 1 }} *</label>
+                      <div class="select-wrapper">
+                        <select v-model="loc.county" class="setup-select">
+                          <option v-for="cnt in getCountiesForState(loc.state)" :key="cnt" :value="cnt">{{ cnt }}</option>
+                        </select>
+                        <IconBase name="chevron-down" :size="13" class="chevron" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Analyze Button -->
+            <div class="analyze-footer">
+              <button class="btn gradient-btn" @click="handleAnalyze">
+                <IconBase name="sparkle" :size="16" /> Analyze Patient Risk & Generate Insights
               </button>
-              
-              <p class="format-note">Supports PDF, Word files up to 200MB</p>
+              <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
             </div>
           </div>
 
-          <!-- Connect Data Source list -->
-          <div v-else class="card connect-card">
-            <div class="connectors-grid">
-              <div class="connector-item clickable" @click="handleAppClick('MyChart')">
-                <img src="/assets/mychart_logo.png" alt="MyChart" class="connector-logo" />
-                <b>MyChart</b>
+          <!-- Assessment History Section (Higher container with Excel-style subtabs) -->
+          <section class="history-section-card" style="margin-top: 10px; background: #ffffff; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03); min-height: 420px; display: flex; flex-direction: column;">
+            <!-- Top History Bar with Tabs matching Excel -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px;">
+              <div style="display: flex; gap: 24px; align-items: center;">
+                <h3 
+                  @click="activeHistoryTab = 'recent'"
+                  :style="{
+                    margin: 0,
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    color: activeHistoryTab === 'recent' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    borderBottom: activeHistoryTab === 'recent' ? '2px solid #4f46e5' : '2px solid transparent',
+                    paddingBottom: '12px',
+                    marginBottom: '-13px',
+                    cursor: 'pointer'
+                  }"
+                >
+                  Recent
+                </h3>
+                <h3 
+                  @click="activeHistoryTab = 'favorites'"
+                  :style="{
+                    margin: 0,
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    color: activeHistoryTab === 'favorites' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    borderBottom: activeHistoryTab === 'favorites' ? '2px solid #4f46e5' : '2px solid transparent',
+                    paddingBottom: '12px',
+                    marginBottom: '-13px',
+                    cursor: 'pointer'
+                  }"
+                >
+                  Favorites ({{ userHistory.filter(i => !!i.is_favorite).length }})
+                </h3>
               </div>
-              <div class="connector-item clickable" @click="handleAppClick('Apple Health')">
-                <img src="/assets/ios_health.png" alt="Apple Health" class="connector-logo" />
-                <b>Apple Health</b>
-              </div>
-              <div class="connector-item clickable" @click="handleAppClick('Google Fit')">
-                <img src="/assets/google_health.png" alt="Google Health" class="connector-logo" />
-                <b>Google Fit</b>
-              </div>
-              <div class="connector-item clickable" @click="handleAppClick('Samsung Health')">
-                <img src="/assets/samsang_health.png" alt="Samsung Health" class="connector-logo" />
-                <b>Samsung Health</b>
-              </div>
+              <span style="font-size: 0.78rem; color: var(--text-secondary); font-weight: 600;">Saved Patient Assessments</span>
             </div>
-            <p v-if="activeTab === 'connect'" class="connect-info-text">
-              Direct connection is coming soon! Please switch to <strong>Upload File</strong> tab to process documents.
-            </p>
-          </div>
 
-          <!-- Form fields -->
-          <section class="form-section" :class="{ 'disabled-section': activeTab === 'connect' }">
-            
-            <div class="form-grid">
-              <!-- Patient Name -->
-              <div class="form-field" :class="{ error: errors.name }">
-                <label>Name *</label>
-                <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" :disabled="activeTab === 'connect'" />
-                <span v-if="errors.name" class="err-msg">Name is required</span>
-              </div>
+            <div v-if="isLoadingHistory" style="padding: 60px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; flex: 1;">
+              Loading assessment history...
+            </div>
 
-              <!-- Age -->
-              <div class="form-field" :class="{ error: errors.age }">
-                <label>Age *</label>
-                <input type="number" v-model="form.age" placeholder="e.g., 54" class="setup-input" :disabled="activeTab === 'connect'" />
-                <span v-if="errors.age" class="err-msg">Age is required</span>
-              </div>
+            <div v-else-if="displayedHistory.length === 0" style="padding: 60px 24px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; background: #f8fafc; border-radius: 12px; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px;">
+              <IconBase name="folder" :size="32" style="color: #94a3b8; margin-bottom: 12px;" />
+              <p style="margin: 0; font-weight: 600; color: #475569;">
+                {{ activeHistoryTab === 'favorites' ? 'No starred favorite records found.' : 'No prior assessment history found.' }}
+              </p>
+              <p style="margin: 4px 0 0; font-size: 0.8rem; color: #94a3b8;">
+                {{ activeHistoryTab === 'favorites' ? 'Click the star icon next to any recent patient record to mark it as favorite.' : 'Click Upload File / Manual above to analyze patient data.' }}
+              </p>
+            </div>
 
-              <!-- Gender -->
-              <div class="form-field">
-                <label>Gender *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.gender" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>Female</option>
-                    <option>Male</option>
-                    <option>Other</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- Diabetes -->
-              <div class="form-field">
-                <label>Diabetes *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.diabetes" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- Hypertension -->
-              <div class="form-field">
-                <label>Hypertension *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.hypertension" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- Heart Disease -->
-              <div class="form-field">
-                <label>Heart Disease *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.heart_disease" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- Asthma -->
-              <div class="form-field">
-                <label>Asthma *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.asthma" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- Height (cm) -->
-              <div class="form-field" :class="{ error: errors.height_cm }">
-                <label>Height (cm) *</label>
-                <input type="number" v-model="form.height_cm" placeholder="e.g., 170" class="setup-input" :disabled="activeTab === 'connect'" />
-                <span v-if="errors.height_cm" class="err-msg">Height is required</span>
-              </div>
-
-              <!-- Weight (kg) -->
-              <div class="form-field" :class="{ error: errors.weight_kg }">
-                <label>Weight (kg) *</label>
-                <input type="number" v-model="form.weight_kg" placeholder="e.g., 70" class="setup-input" :disabled="activeTab === 'connect'" />
-                <span v-if="errors.weight_kg" class="err-msg">Weight is required</span>
-              </div>
-
-              <!-- Country -->
-              <div class="form-field" :class="{ error: errors.country }">
-                <label>Country *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.country" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option value="United States">United States</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- State -->
-              <div class="form-field" :class="{ error: errors.state }">
-                <label>State *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.state" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option v-for="st in US_STATES" :key="st" :value="st">{{ st }}</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
-
-              <!-- County -->
-              <div class="form-field" :class="{ error: errors.county }">
-                <label>County *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.county" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option v-for="cnt in availableCounties" :key="cnt" :value="cnt">{{ cnt }}</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
-              </div>
+            <div v-else style="flex: 1;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 1.5px solid var(--border); color: var(--text-secondary);">
+                    <th style="padding: 12px 10px; width: 36px; text-align: center;">★</th>
+                    <th style="padding: 12px 14px;">Patient Name</th>
+                    <th style="padding: 12px 14px;">Location</th>
+                    <th style="padding: 12px 14px;">Conditions</th>
+                    <th style="padding: 12px 14px;">Date Modified</th>
+                    <th style="padding: 12px 14px; text-align: right;">Download Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in displayedHistory" :key="item.id" style="border-bottom: 1px solid #f1f5f9; transition: background 0.15s ease;" class="history-row-item">
+                    <!-- Favorite Star Button -->
+                    <td style="padding: 14px 10px; text-align: center;">
+                      <button 
+                        type="button" 
+                        @click.stop="toggleFavoriteItem(item)" 
+                        title="Toggle Favorite"
+                        style="background: transparent; border: none; cursor: pointer; font-size: 1.1rem; padding: 2px 4px; transition: transform 0.15s ease;"
+                        onmouseenter="this.style.transform='scale(1.25)'"
+                        onmouseleave="this.style.transform='scale(1.0)'"
+                      >
+                        <span v-if="item.is_favorite" style="color: #f59e0b;">★</span>
+                        <span v-else style="color: #cbd5e1;">☆</span>
+                      </button>
+                    </td>
+                    <td style="padding: 14px; font-weight: 600; color: var(--text-primary);">
+                      {{ item.name || 'Patient Record' }} <span style="font-weight: normal; color: var(--text-secondary); font-size: 0.78rem;">(Age {{ item.age || 45 }})</span>
+                    </td>
+                    <td style="padding: 14px; color: var(--text-secondary);">
+                      {{ item.extra_data?.county || item.county || 'Cuyahoga County' }}, {{ item.extra_data?.state || item.state || 'OH' }}
+                    </td>
+                    <td style="padding: 14px; color: var(--text-secondary);">
+                      <span v-if="item.diabetes === 'Yes'" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; margin-right: 6px;">Diabetes</span>
+                      <span v-if="item.hypertension === 'Yes'" style="background: rgba(245, 158, 11, 0.1); color: #d97706; padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">Hypertension</span>
+                      <span v-if="item.diabetes !== 'Yes' && item.hypertension !== 'Yes'" style="color: #10b981; font-weight: 600; font-size: 0.78rem;">Standard</span>
+                    </td>
+                    <td style="padding: 14px; color: var(--text-secondary); font-size: 0.8rem;">
+                      {{ formatDate(item.timestamp || item.created_at) }}
+                    </td>
+                    <td style="padding: 14px; text-align: right;">
+                      <button @click="downloadHistoryItem(item)" title="Download Assessment Data" style="background: rgba(79, 70, 229, 0.08); border: 1px solid rgba(79, 70, 229, 0.2); color: #4f46e5; border-radius: 6px; padding: 7px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.78rem; transition: all 0.15s ease;">
+                        <IconBase name="download" :size="15" /> Download
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
-
-          <!-- Analyze Button -->
-          <div class="analyze-footer">
-            <button class="btn gradient-btn" @click="handleAnalyze">
-              <IconBase name="sparkle" :size="16" /> Analyze Patient Risk & Generate Insights
-            </button>
-            <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
-          </div>
         </div>
       </main>
 
@@ -915,7 +1286,7 @@ const handleAnalyze = async () => {
 /* Page Setup Grid */
 .setup-grid {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   flex: 1;
   height: calc(100vh - 64px);
   overflow: hidden;
@@ -925,11 +1296,11 @@ const handleAnalyze = async () => {
 .sidebar-guide {
   background: #ffffff;
   border-right: 1px solid var(--border);
-  padding: 20px 18px;
+  padding: 16px 16px;
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 .help-card {
@@ -938,11 +1309,11 @@ const handleAnalyze = async () => {
 
 /* 2. Center Content panel */
 .center-content-panel {
-  padding: 14px 28px;
+  padding: 12px 24px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 12px;
   overflow: hidden;
   height: 100%;
 }
@@ -1521,5 +1892,37 @@ const handleAnalyze = async () => {
 }
 .btn.primary:hover {
   background: var(--brand-dark);
+}
+
+/* Template Card Pop-Up Hover Effect */
+.tpl-card-item {
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+
+.tpl-card-item:hover {
+  transform: translateY(-6px) scale(1.03);
+}
+
+.tpl-card-item:hover .tpl-card-box {
+  border-color: #6366f1 !important;
+  box-shadow: 0 10px 20px rgba(99, 102, 241, 0.15), 0 4px 6px rgba(0, 0, 0, 0.05) !important;
+  background: #ffffff !important;
+}
+
+.tpl-card-item:hover img {
+  transform: scale(1.1);
+  transition: transform 0.2s ease;
+}
+
+/* Toast Vue Animation */
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -20px) scale(0.95) !important;
 }
 </style>
