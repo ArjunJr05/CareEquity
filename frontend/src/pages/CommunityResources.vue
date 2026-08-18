@@ -12,6 +12,12 @@ const searchQuery = ref('')
 const activeCategoryFilter = ref('all') // 'all', 'food', 'health', 'mental', 'transit', 'housing', 'social', 'pharmacy', 'other'
 const viewMode = ref('map') // 'map' or 'list'
 const radiusFilter = ref('25 miles')
+const isRadiusDropdownOpen = ref(false)
+const radiusOptionsList = ['10 miles', '25 miles', '50 miles']
+const selectRadius = (val) => {
+  radiusFilter.value = val
+  isRadiusDropdownOpen.value = false
+}
 
 // Selected resource for the detail rail
 const selectedResource = ref(null)
@@ -672,6 +678,12 @@ watch(isAnalyzed, (newVal) => {
   }
 })
 
+watch(selectedId, () => {
+  const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
+  const lon = isAnalyzed.value ? patientData.value.long : centerLngForCounty(selectedId.value)
+  fetchScrapedResources(lat, lon)
+})
+
 // Initialize resources data and map
 onMounted(() => {
   const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
@@ -728,13 +740,33 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="filter-item radius-col" style="flex: 0 0 160px;">
+          <div class="filter-item radius-col custom-radius-dropdown" style="flex: 0 0 160px; position: relative;">
             <span class="lbl">Radius</span>
-            <select v-model="radiusFilter" class="filter-select">
-              <option value="10 miles">10 miles</option>
-              <option value="25 miles">25 miles</option>
-              <option value="50 miles">50 miles</option>
-            </select>
+            <div class="custom-radius-trigger" @click="isRadiusDropdownOpen = !isRadiusDropdownOpen">
+              <span class="selected-val font-bold">{{ radiusFilter }}</span>
+              <span class="chevron-icon" :class="{ open: isRadiusDropdownOpen }">
+                <IconBase name="chevron-down" :size="12" />
+              </span>
+            </div>
+
+            <!-- Backdrop -->
+            <div v-if="isRadiusDropdownOpen" class="dropdown-backdrop" @click="isRadiusDropdownOpen = false"></div>
+
+            <!-- Custom Menu Popover -->
+            <transition name="menu-fade">
+              <ul v-if="isRadiusDropdownOpen" class="custom-radius-menu">
+                <li 
+                  v-for="opt in radiusOptionsList" 
+                  :key="opt"
+                  class="radius-menu-item"
+                  :class="{ active: radiusFilter === opt }"
+                  @click="selectRadius(opt)"
+                >
+                  <span class="item-text font-semibold">{{ opt }}</span>
+                  <span v-if="radiusFilter === opt" class="active-check">✓</span>
+                </li>
+              </ul>
+            </transition>
           </div>
         </section>
 
@@ -1144,6 +1176,104 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+/* Custom Radius Dropdown UI */
+.custom-radius-trigger {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.custom-radius-trigger:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.selected-val {
+  font-size: 0.76rem;
+  color: var(--text-primary);
+}
+
+.chevron-icon {
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+}
+
+.chevron-icon.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99;
+}
+
+.custom-radius-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radius-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+
+.radius-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.radius-menu-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.radius-menu-item .active-check {
+  color: #2563eb;
+  font-weight: bold;
+}
+
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 .search-input-wrapper {
   position: relative;
   display: flex;
@@ -1185,7 +1315,7 @@ onUnmounted(() => {
 .category-chips-row {
   display: flex;
   gap: 10px;
-  overflow-x: auto;
+  flex-wrap: wrap;
   padding-bottom: 2px;
 }
 
@@ -1956,5 +2086,46 @@ onUnmounted(() => {
 @keyframes marker-pulse {
   0% { transform: scale(0.5); opacity: 1; }
   100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .resource-detail-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .filters-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filter-item {
+    width: 100%;
+  }
+
+  .filter-item.radius-col {
+    flex: 1;
+  }
 }
 </style>

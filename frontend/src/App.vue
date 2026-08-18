@@ -97,5 +97,7 @@ onMounted(async () => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 </style>

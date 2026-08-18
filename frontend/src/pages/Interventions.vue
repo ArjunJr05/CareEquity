@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
 import IconBase from '../components/dashboard/IconBase.vue'
 import { isAnalyzed, patientData, mlPredictionResults } from '../store/appState'
 
@@ -373,7 +374,7 @@ const activeCountyData = computed(() => {
         expectedImpact: '↓ 15.0% Patient Risk',
         priority: 'High',
         status: 'Planned',
-        whyIntervention: `Identified SDoH barrier: "${barrier}". Resolving this barrier is key to improving health outcomes for ${patientData.value.name}.`,
+        whyIntervention: `Identified SDOH barrier: "${barrier}". Resolving this barrier is key to improving health outcomes for ${patientData.value.name}.`,
         keyDrivers: [
           { name: barrier, val: 85, color: 'red' }
         ],
@@ -397,7 +398,7 @@ const activeCountyData = computed(() => {
       highPriority: list.length,
       impactedPop: '1 Patient',
       expectedReached: '1 Patient',
-      potentialImpact: 'SDoH Barrier Mitigation',
+      potentialImpact: 'SDOH Barrier Mitigation',
       impactMembersReached: '1',
       impactRiskReduction: 'High',
       impactVisitsAvoided: '1',
@@ -642,11 +643,13 @@ function getDomainColor(domain) {
         <!-- Patient Specific Context Banner -->
         <section v-if="isAnalyzed" class="card active-patient-banner" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2); border-radius: 12px; margin-bottom: 8px; flex-shrink: 0;">
           <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: rgba(255,255,255,0.2); width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;">🔬</div>
+            <div style="background: #ffffff; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 3px; flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
+              <img :src="microscopeSrc" alt="AI Analysis" style="width: 30px; height: 30px; object-fit: contain;" />
+            </div>
             <div>
               <h3 style="margin: 0; color: white; font-size: 0.95rem; font-weight: 700;">Viewing Interventions for: {{ patientData.name }}</h3>
               <p style="margin: 2px 0 0; font-size: 0.78rem; opacity: 0.9; color: rgba(255,255,255,0.95);">
-                Clinical pathways generated from patient SDoH barriers using Neo4j knowledge graph pathways.
+                Clinical pathways generated from patient SDOH barriers using Neo4j knowledge graph pathways.
               </p>
             </div>
           </div>
@@ -1497,12 +1500,17 @@ function getDomainColor(domain) {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .item-title {
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-primary);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .priority-badge-small {
@@ -1510,6 +1518,7 @@ function getDomainColor(domain) {
   padding: 1px 5px;
   border-radius: 4px;
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .priority-badge-small.high { background: #fee2e2; color: #b91c1c; }
@@ -2010,5 +2019,84 @@ function getDomainColor(domain) {
   font-size: 0.74rem;
   line-height: 1.4;
   margin: 0;
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .intervention-detail-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 1000px) {
+  .intervention-row {
+    grid-template-columns: 36px 1.8fr 1.2fr 80px 24px;
+  }
+  .pop-cell, .impact-cell, .priority-cell {
+    display: none;
+  }
+
+  .impact-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filter-select-col {
+    width: 100%;
+  }
+  
+  .sec-header-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filters-btn {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .intervention-row {
+    grid-template-columns: 36px 1fr 80px 24px;
+  }
+  .drivers-cell {
+    display: none;
+  }
+
+  .impact-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .impact-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

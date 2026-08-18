@@ -255,7 +255,7 @@ const activeReportData = computed(() => {
         { name: patientData.value.name, score: avgRisk.toFixed(2), svi: 0.65, pop: '1' }
       ],
       correlation: 0.75,
-      correlationLabel: 'High Individual SDoH Correlation',
+      correlationLabel: 'High Individual SDOH Correlation',
       scatterDots: [
         { x: 50, y: Math.round((1-avgRisk)*100) }
       ]
@@ -373,7 +373,7 @@ function downloadPatientReport() {
   let barriersSectionHtml = ''
   if (barriers && barriers.length > 0) {
     barriersSectionHtml = `
-      <div class="section-title">Identified SDoH Barriers</div>
+      <div class="section-title">Identified SDOH Barriers</div>
       <div class="card" style="margin-bottom: 20px;">
         ${barriers.map(b => `<span class="barrier-tag">${b}</span>`).join(' ')}
       </div>
@@ -607,7 +607,7 @@ function downloadPatientReport() {
           </div>
         </div>
 
-        <h1 class="report-title">Overall Health & SDoH Assessment Report</h1>
+        <h1 class="report-title">Overall Health & SDOH Assessment Report</h1>
         <div class="report-subtitle">Comprehensive analysis of clinical risks, social determinants barriers, and local environmental support assets.</div>
 
         <div class="section-title">Patient Profile Summary</div>
@@ -957,7 +957,7 @@ function exportCSV() {
                 <div v-for="fact in activeReportData.drivers" :key="fact.name" class="factor-progress-item">
                   <div class="label-row font-semibold">
                     <span class="name">{{ fact.name }}</span>
-                    <span class="score-val">{{ fact.score }}</span>
+                    <span class="score-val">{{ typeof fact.score === 'number' ? (fact.score % 1 === 0 ? fact.score : fact.score.toFixed(2)) : fact.score }}</span>
                   </div>
                   <div class="bar-bg">
                     <div class="bar-fill" :style="{ width: (fact.score * 100) + '%', backgroundColor: fact.color }"></div>
@@ -1454,8 +1454,13 @@ function exportCSV() {
 }
 
 .center-text .score {
-  font-size: 0.95rem;
+  font-size: 0.72rem;
   color: var(--text-primary);
+  max-width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .center-text .label {
@@ -1915,5 +1920,36 @@ function exportCSV() {
   cursor: pointer;
   font-size: 0.65rem;
   padding: 0 4px;
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .preview-stats-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .preview-charts-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .preview-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .preview-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .preview-stats-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

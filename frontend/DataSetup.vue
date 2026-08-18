@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from './src/components/dashboard/IconBase.vue'
+import CustomSelect from './src/components/dashboard/CustomSelect.vue'
 import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from './src/store/appState'
 import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from './src/config'
 import { US_STATES, US_COUNTIES_BY_STATE } from './src/data/usData.js'
@@ -45,8 +46,35 @@ const fileName = ref('')
 const fileSize = ref('')
 const isDragOver = ref(false)
 
+// Toast State
+const toast = ref({
+  show: false,
+  msg: '',
+  type: 'error', // 'success' or 'error'
+  title: 'Oops!'
+})
+let toastTimer = null
+
+const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
+
+const showToast = (msg, type = 'error') => {
+  toast.value.show = true
+  toast.value.msg = msg
+  toast.value.type = type
+  toast.value.title = type === 'success' ? 'Success!' : 'Oops!'
+
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toast.value.show = false
+  }, 3500)
+}
+
+const hideToast = () => {
+  toast.value.show = false
+}
+
 const handleAppClick = (appName) => {
-  alert(`${appName} integration is coming in a future update! Please use the "Upload File" tab to parse patient data.`)
+  showToast(`${appName} integration is coming in a future update! Please use the "Upload File" tab to parse patient data.`, 'error')
 }
 
 const form = ref({
@@ -179,7 +207,7 @@ const onFileChange = (e) => {
       fileSize.value = (file.size / (1024 * 1024)).toFixed(1) + ' MB'
       uploadFileToOCR(file)
     } else {
-      alert('Only PDF and Word documents are supported!')
+      showToast('Only PDF and Word documents are supported!', 'error')
       e.target.value = ''
     }
   }
@@ -203,7 +231,7 @@ const onDrop = (e) => {
       fileSize.value = (file.size / (1024 * 1024)).toFixed(1) + ' MB'
       uploadFileToOCR(file)
     } else {
-      alert('Only PDF and Word documents are supported!')
+      showToast('Only PDF and Word documents are supported!', 'error')
     }
   }
 }
@@ -409,6 +437,19 @@ const handleAnalyze = async () => {
 
 <template>
   <div class="data-setup-page">
+    <!-- Toast -->
+    <div class="toast" :class="[toast.type, { show: toast.show }]">
+      <div class="toast-icon">
+        <IconBase :name="toast.type === 'success' ? 'shield' : 'lock'" :size="14" />
+      </div>
+      <div>
+        <div class="toast-title">{{ toast.title }}</div>
+        <div class="toast-msg">{{ toast.msg }}</div>
+      </div>
+      <button class="toast-close" @click="hideToast">×</button>
+      <div class="toast-bar"></div>
+    </div>
+
     <!-- Processing overlay -->
     <div v-if="isAnalyzing" class="analysis-overlay">
       <article class="card loading-card">
@@ -479,7 +520,7 @@ const handleAnalyze = async () => {
               </div>
             </li>
             <li>
-              <span class="flow-icon-gif"><img src="/assets/magnifying-glass-fingerprint.gif" alt="AI Analysis" class="flow-gif" /></span>
+              <span class="flow-icon-gif"><img :src="microscopeSrc" alt="AI Analysis" class="flow-gif" /></span>
               <div>
                 <h5>AI Analysis</h5>
                 <p>Predict risks, gaps & opportunities</p>
@@ -619,7 +660,7 @@ const handleAnalyze = async () => {
               <!-- Patient Name -->
               <div class="form-field" :class="{ error: errors.name }">
                 <label>Name *</label>
-                <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" :disabled="activeTab === 'connect'" />
+                <input type="text" v-model="form.name" @input="form.name = form.name.replace(/[^a-zA-Z\s.'-]/g, '')" placeholder="e.g., Robert Chen" class="setup-input" :disabled="activeTab === 'connect'" />
                 <span v-if="errors.name" class="err-msg">Name is required</span>
               </div>
 
@@ -633,62 +674,31 @@ const handleAnalyze = async () => {
               <!-- Gender -->
               <div class="form-field">
                 <label>Gender *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.gender" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>Female</option>
-                    <option>Male</option>
-                    <option>Other</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.gender" :options="['Female', 'Male', 'Other']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- Diabetes -->
               <div class="form-field">
                 <label>Diabetes *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.diabetes" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.diabetes" :options="['No', 'Yes']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- Hypertension -->
               <div class="form-field">
                 <label>Hypertension *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.hypertension" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.hypertension" :options="['No', 'Yes']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- Heart Disease -->
               <div class="form-field">
                 <label>Heart Disease *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.heart_disease" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.heart_disease" :options="['No', 'Yes']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- Asthma -->
               <div class="form-field">
                 <label>Asthma *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.asthma" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.asthma" :options="['No', 'Yes']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- Height (cm) -->
@@ -708,34 +718,19 @@ const handleAnalyze = async () => {
               <!-- Country -->
               <div class="form-field" :class="{ error: errors.country }">
                 <label>Country *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.country" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option value="United States">United States</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.country" :options="['United States']" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- State -->
               <div class="form-field" :class="{ error: errors.state }">
                 <label>State *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.state" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option v-for="st in US_STATES" :key="st" :value="st">{{ st }}</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.state" :options="US_STATES" :disabled="activeTab === 'connect'" />
               </div>
 
               <!-- County -->
               <div class="form-field" :class="{ error: errors.county }">
                 <label>County *</label>
-                <div class="select-wrapper">
-                  <select v-model="form.county" class="setup-select" :disabled="activeTab === 'connect'">
-                    <option v-for="cnt in availableCounties" :key="cnt" :value="cnt">{{ cnt }}</option>
-                  </select>
-                  <IconBase name="chevron-down" :size="13" class="chevron" />
-                </div>
+                <CustomSelect v-model="form.county" :options="availableCounties" :disabled="activeTab === 'connect'" />
               </div>
             </div>
 
@@ -1855,5 +1850,181 @@ const handleAnalyze = async () => {
 }
 .btn.primary:hover {
   background: var(--brand-dark);
+}
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-120%);
+  min-width: min(420px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(37, 99, 235, 0.1);
+  z-index: 100000;
+  transition: transform .35s cubic-bezier(.2, .8, .2, 1);
+  overflow: hidden;
+}
+
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.toast.success .toast-icon {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.toast.error .toast-icon {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.toast-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.toast-msg {
+  font-size: 13px;
+  color: #475569;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  color: #475569;
+  line-height: 1;
+}
+
+.toast-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  transform-origin: left;
+}
+
+.toast.success .toast-bar {
+  background: #22c55e;
+}
+
+.toast.error .toast-bar {
+  background: #ef4444;
+}
+
+/* ── RESPONSIVE DESIGN ── */
+@media (max-width: 1024px) {
+  .data-setup-page {
+    overflow: auto;
+  }
+
+  .setup-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .sidebar-guide {
+    height: auto;
+    overflow-y: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 24px 18px;
+  }
+
+  .center-content-panel {
+    height: auto;
+    overflow: visible;
+    padding: 24px 18px;
+  }
+
+  .center-panel-wrapper {
+    height: auto;
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .form-field.fullwidth {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-bar {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-field.fullwidth {
+    grid-column: span 1;
+  }
+
+  .connectors-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+}
+
+/* Make Sign In / Login button icon spin on hover */
+.btn-login-trigger:hover :deep(.icon) {
+  animation: spin-slow 8s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>
+
+<style>
+.btn-login-trigger:hover .icon {
+  animation: spin-slow-global 8s linear infinite !important;
+  transform-origin: center !important;
+}
+
+@keyframes spin-slow-global {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

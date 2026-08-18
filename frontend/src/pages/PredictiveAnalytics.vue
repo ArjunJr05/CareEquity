@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
 import IconBase from '../components/dashboard/IconBase.vue'
 import { patientData, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
 
@@ -706,7 +707,9 @@ function handleLocationFilterChange(e) {
         <section v-if="isAnalyzed" class="card active-patient-prediction-panel" style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); color: white; border: none; border-radius: var(--radius-lg); padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(49, 46, 129, 0.2);">
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
             <div style="display: flex; align-items: center; gap: 12px;">
-              <span style="font-size: 24px;">👤</span>
+              <div style="background: #ffffff; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 4px; flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <img :src="microscopeSrc" alt="AI Analysis" style="width: 32px; height: 32px; object-fit: contain;" />
+              </div>
               <div>
                 <h3 style="margin: 0; color: white; font-size: 1.25rem; font-weight: 800;">Patient Risk Profile: {{ patientData.name }}</h3>
                 <p style="margin: 4px 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.7);">
@@ -760,7 +763,7 @@ function handleLocationFilterChange(e) {
 
             <!-- Column 3: Geocoded Location SDoH Risk -->
             <div style="flex: 2; min-width: 300px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; justify-content: space-between;">
-              <p style="margin: 0 0 16px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.7);">Geocoded Location SDoH Barriers</p>
+              <p style="margin: 0 0 16px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.7);">Geocoded Location SDOH Barriers</p>
               
               <div v-if="predictionModelResults" style="display: flex; flex-direction: column; gap: 12px; font-size: 0.8rem;">
                 <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
@@ -1065,7 +1068,7 @@ function handleLocationFilterChange(e) {
               <!-- 1. Risk by Geographic Area -->
               <div class="card geo-risk-card">
                 <div class="card-head-actions border-b">
-                  <h4>{{ isAnalyzed ? 'Local Location SDoH Breakdown' : 'Risk by Geographic Area' }} <span v-if="!isAnalyzed" class="light">(Top 10)</span> <span class="info-tooltip-btn"><IconBase name="help" :size="11" /></span></h4>
+                  <h4>{{ isAnalyzed ? 'Local Location SDOH Breakdown' : 'Risk by Geographic Area' }} <span v-if="!isAnalyzed" class="light">(Top 10)</span> <span class="info-tooltip-btn"><IconBase name="help" :size="11" /></span></h4>
                   
                   <div class="geo-capsule-tabs">
                     <button :class="{ active: activeGeoTab === 'county' }" @click="activeGeoTab = 'county'">County</button>
@@ -1078,7 +1081,7 @@ function handleLocationFilterChange(e) {
                   <table class="geo-custom-table">
                     <thead>
                       <tr>
-                        <th class="text-left">{{ isAnalyzed ? 'SDoH Barrier Domain' : 'Name' }}</th>
+                        <th class="text-left">{{ isAnalyzed ? 'SDOH Barrier Domain' : 'Name' }}</th>
                         <th class="text-center" style="width: 100px;">{{ isAnalyzed ? 'Vulnerability Score' : 'Predicted Risk' }}</th>
                         <th class="text-right" style="width: 100px;">{{ isAnalyzed ? 'Barrier Impact' : 'Members' }}</th>
                       </tr>
@@ -2376,5 +2379,52 @@ function handleLocationFilterChange(e) {
   gap: 4px;
   color: #059669;
   font-weight: 600;
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1280px) {
+  .geographic-radar-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .layout-grid-main {
+    grid-template-columns: 1fr;
+  }
+
+  .predictive-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .predictive-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .content-body {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .geographic-radar-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .predictive-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .predictive-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    height: auto;
+    padding: 16px;
+  }
 }
 </style>

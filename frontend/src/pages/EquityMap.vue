@@ -546,7 +546,7 @@ const axes = [
             <div>
               <h3 style="margin: 0; color: white; font-size: 0.95rem; font-weight: 700;">Active Patient: {{ patientData.name }} (Age {{ patientData.age }})</h3>
               <p style="margin: 2px 0 0; font-size: 0.78rem; opacity: 0.9; color: rgba(255,255,255,0.9);">
-                Dynamically geo-matching coordinates to SDoH risk indicators.
+                Dynamically geo-matching coordinates to SDOH risk indicators.
               </p>
             </div>
           </div>
@@ -560,9 +560,6 @@ const axes = [
               <span class="trend-badge">{{ kpiStats.communities.trend }}</span>
             </div>
             <div class="kpi-value">{{ kpiStats.communities.val }}</div>
-            <svg class="sparkline" viewBox="0 0 100 20">
-              <path d="M0 15 Q20 5, 40 12 T80 8 T100 15" fill="none" stroke="#2563eb" stroke-width="2" />
-            </svg>
           </div>
 
           <div class="card kpi-card red">
@@ -571,9 +568,6 @@ const axes = [
               <span class="trend-badge">{{ kpiStats.vulnerability.trend }}</span>
             </div>
             <div class="kpi-value">{{ kpiStats.vulnerability.val }}</div>
-            <svg class="sparkline" viewBox="0 0 100 20">
-              <path d="M0 10 Q25 18, 50 5 T100 10" fill="none" stroke="#ef4444" stroke-width="2" />
-            </svg>
           </div>
 
           <div class="card kpi-card purple">
@@ -582,9 +576,6 @@ const axes = [
               <span class="trend-badge">{{ kpiStats.hotspots.trend }}</span>
             </div>
             <div class="kpi-value">{{ kpiStats.hotspots.val }}</div>
-            <svg class="sparkline" viewBox="0 0 100 20">
-              <path d="M0 18 Q20 8, 40 15 T80 5 T100 12" fill="none" stroke="#8b5cf6" stroke-width="2" />
-            </svg>
           </div>
 
           <div class="card kpi-card green">
@@ -593,9 +584,6 @@ const axes = [
               <span class="trend-badge">{{ kpiStats.resources.trend }}</span>
             </div>
             <div class="kpi-value">{{ kpiStats.resources.val }}</div>
-            <svg class="sparkline" viewBox="0 0 100 20">
-              <path d="M0 12 Q30 5, 60 15 T100 8" fill="none" stroke="#10b981" stroke-width="2" />
-            </svg>
           </div>
         </section>
 
@@ -691,7 +679,7 @@ const axes = [
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
             <span style="background: rgba(79, 70, 229, 0.1); width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4f46e5;">📍</span>
             <div>
-              <h4 style="margin: 0; font-size: 0.9rem; font-weight: bold; color: var(--text-primary);">Entered Location SDoH</h4>
+              <h4 style="margin: 0; font-size: 0.9rem; font-weight: bold; color: var(--text-primary);">Entered Location SDOH</h4>
               <p style="margin: 2px 0 0; font-size: 0.75rem; color: var(--text-secondary);">Real-time Geocoded Coordinates</p>
             </div>
           </div>
@@ -1637,5 +1625,57 @@ const axes = [
   background: #ffffff;
   border: 1px solid var(--border);
   color: var(--text-primary);
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .details-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    padding: 20px;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .report-btn {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .layer-capsule {
+    flex-wrap: wrap;
+  }
 }
 </style>
