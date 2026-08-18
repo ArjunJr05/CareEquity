@@ -16,13 +16,13 @@ const nav = computed(() => {
     ]
   }
   return [
-    { name: 'Overview', icon: 'home', to: '/' },
-    { name: 'Equity Map', icon: 'map', to: '/equity-map' },
-    { name: 'SDOH Insights', icon: 'pulse', to: '/sdoh-insights' },
-    { name: 'Predictive Analytics', icon: 'trend', to: '/predictive-analytics' },
-    { name: 'Community Resources', icon: 'hand-heart', to: '/community-resources' },
-    { name: 'Interventions', icon: 'bulb', to: '/interventions' },
-    { name: 'Reports', icon: 'report', to: '/reports' },
+    { name: 'Overview', icon: 'home', gif: '/assets/home.gif', to: '/' },
+    { name: 'Equity Map', icon: 'map', gif: '/assets/map.gif', to: '/equity-map' },
+    { name: 'SDOH Insights', icon: 'pulse', gif: '/assets/statistics.gif', to: '/sdoh-insights' },
+    { name: 'Predictive Analytics', icon: 'trend', gif: '/assets/analysis.gif', to: '/predictive-analytics' },
+    { name: 'Community Resources', icon: 'hand-heart', gif: '/assets/community.gif', to: '/community-resources' },
+    { name: 'Interventions', icon: 'bulb', gif: '/assets/idea.gif', to: '/interventions' },
+    { name: 'Reports', icon: 'report', gif: '/assets/report.gif', to: '/reports' },
   ]
 })
 </script>
@@ -33,7 +33,7 @@ const nav = computed(() => {
       <div class="brand-info">
         <img src="/assets/careequity_logo.png" class="brand-logo" alt="CareEquity Logo" />
         <div class="brand-text" v-show="!isCollapsed">
-          <p class="brand-name">CareEquity</p>
+          <img src="/assets/careequity_name.png" class="brand-name-img" alt="CareEquity" />
         </div>
       </div>
       <button class="toggle-collapse-btn" @click="toggleCollapse" :title="isCollapsed ? 'Expand' : 'Collapse'">
@@ -50,7 +50,8 @@ const nav = computed(() => {
         exact-active-class="active" 
         :title="isCollapsed ? item.name : ''"
       >
-        <IconBase :name="item.icon" :size="18" />
+        <img v-if="item.gif" :src="item.gif" class="nav-icon-gif" alt="" />
+        <IconBase v-else :name="item.icon" :size="18" />
         <span class="nav-label" v-show="!isCollapsed">{{ item.name }}</span>
       </router-link>
     </nav>
@@ -114,12 +115,10 @@ const nav = computed(() => {
   flex-direction: column;
 }
 
-.brand-name {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  white-space: nowrap;
+.brand-name-img {
+  height: 60px;
+  object-fit: contain;
+  display: block;
 }
 
 .brand-sub {
@@ -189,5 +188,12 @@ const nav = computed(() => {
 
 .nav-label {
   white-space: nowrap;
+}
+
+.nav-icon-gif {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 </style>

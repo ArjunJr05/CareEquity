@@ -842,10 +842,12 @@ const activeCommunity = computed(() => communities[selectedId.value])
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: var(--radius-lg);
-  padding: 10px 18px;
+  padding: 12px 18px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .banner-left {
@@ -878,8 +880,15 @@ const activeCommunity = computed(() => communities[selectedId.value])
 }
 
 .sources-chips {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 8px 24px;
+}
+
+@media (max-width: 1280px) {
+  .sources-chips {
+    grid-template-columns: repeat(2, auto);
+  }
 }
 
 .source-chip {
@@ -889,6 +898,7 @@ const activeCommunity = computed(() => communities[selectedId.value])
   display: flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .chip-dot {

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
+import FloatingChatbot from '../components/dashboard/FloatingChatbot.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
@@ -531,7 +532,7 @@ const handleSendMessage = () => {
           <div>
             <h3 style="margin: 0; color: white; font-size: 1.1rem; font-weight: 700;">Active Patient: {{ patientData.name }} (Age {{ patientData.age }})</h3>
             <p style="margin: 4px 0 0; font-size: 0.85rem; opacity: 0.9; color: rgba(255,255,255,0.9);">
-              Individual Risk Prediction & social determinants generated via FastAPI machine learning service.
+              Individual Risk Prediction & social determinants generated via CareEquity Predictive System.
             </p>
           </div>
         </div>
@@ -592,7 +593,6 @@ const handleSendMessage = () => {
                 <h4 class="font-bold" style="margin: 0;">{{ selectedCommunity.name }}</h4>
                 <p v-if="selectedCommunity.state" style="margin: 2px 0 0; font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">{{ selectedCommunity.state }}</p>
               </div>
-              <button class="btn-heart"><IconBase name="heart" :size="17" /></button>
             </div>
             <p class="community-sub">Health Equity Score</p>
 
@@ -839,6 +839,7 @@ const handleSendMessage = () => {
         </div>
       </div>
     </aside>
+    <FloatingChatbot />
   </div>
 </template>
 

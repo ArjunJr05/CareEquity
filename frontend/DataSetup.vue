@@ -55,7 +55,7 @@ const toast = ref({
 })
 let toastTimer = null
 
-const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
+const microscopeSrc = ref(`/assets/magnifying-glass-fingerprint.gif?t=${Date.now()}`)
 
 const showToast = (msg, type = 'error') => {
   toast.value.show = true

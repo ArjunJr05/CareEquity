@@ -15,6 +15,19 @@ const mapLayers = [
   { id: 'care', name: 'Healthcare Access' }
 ]
 const activeLayer = ref('health')
+const layerCapsuleRef = ref(null)
+
+function scrollCapsuleLeft() {
+  if (layerCapsuleRef.value) {
+    layerCapsuleRef.value.scrollBy({ left: -140, behavior: 'smooth' })
+  }
+}
+
+function scrollCapsuleRight() {
+  if (layerCapsuleRef.value) {
+    layerCapsuleRef.value.scrollBy({ left: 140, behavior: 'smooth' })
+  }
+}
 
 // Communities metadata
 const communities = {
@@ -591,15 +604,23 @@ const axes = [
         <section class="toolbar-section">
           <div class="layer-selector">
             <span class="lbl">Map Layer</span>
-            <div class="layer-capsule">
-              <button 
-                v-for="layer in mapLayers" 
-                :key="layer.id"
-                class="layer-btn"
-                :class="{ active: activeLayer === layer.id }"
-                @click="activeLayer = layer.id"
-              >
-                {{ layer.name }}
+            <div class="layer-capsule-wrapper">
+              <button class="scroll-arrow-btn left" @click="scrollCapsuleLeft" title="Scroll Left">
+                <IconBase name="chevron-left" :size="12" />
+              </button>
+              <div ref="layerCapsuleRef" class="layer-capsule">
+                <button 
+                  v-for="layer in mapLayers" 
+                  :key="layer.id"
+                  class="layer-btn"
+                  :class="{ active: activeLayer === layer.id }"
+                  @click="activeLayer = layer.id"
+                >
+                  {{ layer.name }}
+                </button>
+              </div>
+              <button class="scroll-arrow-btn right" @click="scrollCapsuleRight" title="Scroll Right">
+                <IconBase name="chevron-right" :size="12" />
               </button>
             </div>
           </div>
@@ -677,10 +698,11 @@ const axes = [
         <!-- Patient Real-time Location SDoH Card -->
         <div v-if="isAnalyzed" class="patient-realtime-card" style="border: 1px solid rgba(79, 70, 229, 0.2); background: #fdfdfd; border-radius: var(--radius-md); padding: 16px; margin-bottom: 8px; flex-shrink: 0;">
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
-            <span style="background: rgba(79, 70, 229, 0.1); width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4f46e5;">📍</span>
+            <span style="background: #ffffff; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border);">
+              <img src="/assets/meeting-point.png" style="width: 22px; height: 22px; object-fit: contain;" />
+            </span>
             <div>
               <h4 style="margin: 0; font-size: 0.9rem; font-weight: bold; color: var(--text-primary);">Entered Location SDOH</h4>
-              <p style="margin: 2px 0 0; font-size: 0.75rem; color: var(--text-secondary);">Real-time Geocoded Coordinates</p>
             </div>
           </div>
           
@@ -734,7 +756,7 @@ const axes = [
         <!-- Selected Community Title -->
         <div class="selected-header-card">
           <span class="card-icon-box">
-            <IconBase name="pin" :size="18" />
+            <img src="/assets/location.png" style="width: 22px; height: 22px; object-fit: contain;" />
           </span>
           <div class="text-info">
             <h4>{{ selectedCommunity.name }}</h4>
@@ -1007,6 +1029,8 @@ const axes = [
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .layer-selector .lbl {
@@ -1017,12 +1041,57 @@ const axes = [
   letter-spacing: 0.02em;
 }
 
+.layer-capsule-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  position: relative;
+  min-width: 0;
+}
+
+.scroll-arrow-btn {
+  display: none;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.scroll-arrow-btn:hover {
+  background: #f1f5f9;
+  color: var(--text-primary);
+  border-color: #cbd5e1;
+}
+
+.scroll-arrow-btn:active {
+  transform: scale(0.94);
+}
+
 .layer-capsule {
   display: inline-flex;
   background: #e2e8f0;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 3px;
+  max-width: 100%;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  white-space: nowrap;
+  scrollbar-width: none;
+  box-sizing: border-box;
+}
+
+.layer-capsule::-webkit-scrollbar {
+  display: none;
 }
 
 .layer-btn {
@@ -1035,6 +1104,7 @@ const axes = [
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .layer-btn.active {
@@ -1223,9 +1293,9 @@ const axes = [
 }
 
 .trends-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
 }
 
 .trend-item {
@@ -1233,6 +1303,8 @@ const axes = [
   align-items: center;
   gap: 8px;
   font-size: 0.72rem;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .icon-indicator {
@@ -1307,8 +1379,8 @@ const axes = [
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: #f5f3ff;
-  color: #8b5cf6;
+  background: #ffffff;
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1629,6 +1701,10 @@ const axes = [
 
 /* ── RESPONSIVE OVERRIDES ── */
 @media (max-width: 1100px) {
+  .scroll-arrow-btn {
+    display: flex;
+  }
+
   .main-layout {
     flex-direction: column;
     height: 100%;
@@ -1674,8 +1750,31 @@ const axes = [
     grid-template-columns: 1fr;
   }
   
+  .layer-selector {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: 8px;
+  }
+
   .layer-capsule {
-    flex-wrap: wrap;
+    width: 100%;
+    display: flex;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+    box-sizing: border-box;
+  }
+
+  .layer-capsule::-webkit-scrollbar {
+    display: none;
+  }
+
+  .layer-btn {
+    flex-shrink: 0;
+    flex: 1;
+    text-align: center;
+    padding: 6px 10px;
   }
 }
 </style>

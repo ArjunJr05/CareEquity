@@ -249,7 +249,7 @@ const activeReportData = computed(() => {
           ]).map((barrier, index) => ({
         name: barrier,
         score: 0.85 - index * 0.1,
-        color: ['#3b82f6', '#10b981', '#8b5cf6', '#f97316', '#ef4444'][index % 5]
+        color: ['#8b5cf6', '#10b981', '#f97316', '#3b82f6', '#ef4444'][index % 5]
       })),
       tableAreas: [
         { name: patientData.value.name, score: avgRisk.toFixed(2), svi: 0.65, pop: '1' }
@@ -262,6 +262,45 @@ const activeReportData = computed(() => {
     }
   }
   return reportTemplatesData[activeGeography.value] || reportTemplatesData['Cuyahoga County, OH']
+})
+
+const domainSegments = computed(() => {
+  const list = activeReportData.value.domains || []
+  const total = list.reduce((sum, d) => sum + d.score, 0)
+  if (total === 0) return []
+  
+  let accumulated = 0
+  return list.map(d => {
+    const value = (d.score / total) * 238
+    const offset = -accumulated
+    accumulated += value
+    return {
+      name: d.name,
+      color: d.color,
+      dashArray: `${value} 238`,
+      dashOffset: offset
+    }
+  })
+})
+
+const riskSegments = computed(() => {
+  const list = activeReportData.value.riskDistribution || []
+  const total = list.reduce((sum, r) => sum + parseFloat(r.pct), 0)
+  if (total === 0) return []
+  
+  let accumulated = 0
+  return list.map(r => {
+    const val = parseFloat(r.pct)
+    const value = (val / total) * 238
+    const offset = -accumulated
+    accumulated += value
+    return {
+      label: r.label,
+      color: r.color,
+      dashArray: `${value} 238`,
+      dashOffset: offset
+    }
+  })
 })
 
 function handleSavedReportsClick() {
@@ -784,67 +823,67 @@ function exportCSV() {
           <div class="preview-stats-row">
             
             <div class="stat-mini-card">
-              <span class="lbl font-semibold">Health Equity Score</span>
-              <div class="val-row">
-                <h2>{{ activeReportData.equityScore }} <span class="max">/100</span></h2>
-                <span class="meta-label orange font-bold">{{ activeReportData.equityLabel }}</span>
+              <div class="card-icon-bubble purple">
+                <IconBase name="shield" :size="16" />
               </div>
-              <div class="sparkline-wrapper">
-                <svg viewBox="0 0 100 15" class="mini-sparkline orange">
-                  <path d="M0,12 Q20,3 40,8 T80,4 T100,10" fill="none" stroke="#f97316" stroke-width="1.8" />
-                </svg>
-              </div>
-            </div>
-
-            <div class="stat-mini-card">
-              <span class="lbl font-semibold">Population Analyzed</span>
-              <div class="val-row">
-                <h2>{{ activeReportData.population }}</h2>
-                <span class="trend green font-semibold">{{ activeReportData.popTrend }}</span>
-              </div>
-              <div class="sparkline-wrapper">
-                <svg viewBox="0 0 100 15" class="mini-sparkline green">
-                  <path d="M0,13 Q20,10 40,11 T80,5 T100,2" fill="none" stroke="#10b981" stroke-width="1.8" />
-                </svg>
+              <div class="card-content">
+                <span class="lbl font-semibold">Health Equity Score</span>
+                <div class="val-row">
+                  <h2>{{ activeReportData.equityScore }} <span class="max">/100</span></h2>
+                  <span class="meta-label orange font-bold">{{ activeReportData.equityLabel }}</span>
+                </div>
               </div>
             </div>
 
             <div class="stat-mini-card">
-              <span class="lbl font-semibold">High-Risk Population</span>
-              <div class="val-row">
-                <h2>{{ activeReportData.highRiskPop }}</h2>
-                <span class="trend purple font-semibold">{{ activeReportData.highRiskPct }}</span>
+              <div class="card-icon-bubble green">
+                <IconBase name="users" :size="16" />
               </div>
-              <div class="sparkline-wrapper">
-                <svg viewBox="0 0 100 15" class="mini-sparkline purple">
-                  <path d="M0,10 Q20,12 40,5 T80,9 T100,13" fill="none" stroke="#8b5cf6" stroke-width="1.8" />
-                </svg>
-              </div>
-            </div>
-
-            <div class="stat-mini-card">
-              <span class="lbl font-semibold">Equity Gap Identified</span>
-              <div class="val-row">
-                <h2>{{ activeReportData.equityGap }}</h2>
-                <span class="trend orange font-semibold">vs national average</span>
-              </div>
-              <div class="sparkline-wrapper">
-                <svg viewBox="0 0 100 15" class="mini-sparkline orange">
-                  <path d="M0,14 Q20,11 40,12 T80,6 T100,4" fill="none" stroke="#f97316" stroke-width="1.8" />
-                </svg>
+              <div class="card-content">
+                <span class="lbl font-semibold">Population Analyzed</span>
+                <div class="val-row">
+                  <h2>{{ activeReportData.population }}</h2>
+                  <span class="trend green font-semibold">{{ activeReportData.popTrend }}</span>
+                </div>
               </div>
             </div>
 
             <div class="stat-mini-card">
-              <span class="lbl font-semibold">Intervention Opportunities</span>
-              <div class="val-row">
-                <h2>{{ activeReportData.interventions }}</h2>
-                <span class="trend green font-semibold">Active opportunities</span>
+              <div class="card-icon-bubble orange">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               </div>
-              <div class="sparkline-wrapper">
-                <svg viewBox="0 0 100 15" class="mini-sparkline green">
-                  <path d="M0,11 Q20,14 40,10 T80,12 T100,8" fill="none" stroke="#10b981" stroke-width="1.8" />
-                </svg>
+              <div class="card-content">
+                <span class="lbl font-semibold">High-Risk Population</span>
+                <div class="val-row">
+                  <h2>{{ activeReportData.highRiskPop }}</h2>
+                  <span class="trend purple font-semibold">{{ activeReportData.highRiskPct }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="stat-mini-card">
+              <div class="card-icon-bubble blue">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><line x1="5" y1="5" x2="19" y2="5"/><path d="M19 5l-3 7H8L5 5"/></svg>
+              </div>
+              <div class="card-content">
+                <span class="lbl font-semibold">Equity Gap Identified</span>
+                <div class="val-row">
+                  <h2>{{ activeReportData.equityGap }}</h2>
+                  <span class="trend orange font-semibold">vs national average</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="stat-mini-card">
+              <div class="card-icon-bubble red">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              </div>
+              <div class="card-content">
+                <span class="lbl font-semibold">Intervention Opportunities</span>
+                <div class="val-row">
+                  <h2>{{ activeReportData.interventions }}</h2>
+                  <span class="trend green font-semibold">Active opportunities</span>
+                </div>
               </div>
             </div>
 
@@ -860,17 +899,18 @@ function exportCSV() {
                 <div class="donut-svg-wrapper">
                   <svg viewBox="0 0 100 100" class="donut-svg">
                     <circle cx="50" cy="50" r="38" fill="none" stroke="#f1f5f9" stroke-width="12" />
-                    <!-- Highlighted ring segment representation -->
+                    <!-- Dynamic end-to-end colorful segments -->
                     <circle 
+                      v-for="seg in domainSegments"
+                      :key="seg.name"
                       cx="50" 
                       cy="50" 
                       r="38" 
                       fill="none" 
-                      stroke="#3b82f6" 
+                      :stroke="seg.color" 
                       stroke-width="12" 
-                      stroke-dasharray="238" 
-                      :stroke-dashoffset="238 - (238 * activeReportData.equityScore) / 100" 
-                      stroke-linecap="round"
+                      :stroke-dasharray="seg.dashArray" 
+                      :stroke-dashoffset="seg.dashOffset" 
                       transform="rotate(-90 50 50)"
                     />
                   </svg>
@@ -898,44 +938,24 @@ function exportCSV() {
                 <div class="donut-svg-wrapper">
                   <svg viewBox="0 0 100 100" class="donut-svg">
                     <circle cx="50" cy="50" r="38" fill="none" stroke="#f1f5f9" stroke-width="12" />
-                    <!-- Stacked risk segment representations -->
+                    <!-- Dynamic end-to-end colorful segments -->
                     <circle 
+                      v-for="seg in riskSegments"
+                      :key="seg.label"
                       cx="50" 
                       cy="50" 
                       r="38" 
                       fill="none" 
-                      stroke="#ef4444" 
+                      :stroke="seg.color" 
                       stroke-width="12" 
-                      stroke-dasharray="238" 
-                      stroke-dashoffset="180" 
+                      :stroke-dasharray="seg.dashArray" 
+                      :stroke-dashoffset="seg.dashOffset" 
                       transform="rotate(-90 50 50)"
-                    />
-                    <circle 
-                      cx="50" 
-                      cy="50" 
-                      r="38" 
-                      fill="none" 
-                      stroke="#f97316" 
-                      stroke-width="12" 
-                      stroke-dasharray="238" 
-                      stroke-dashoffset="200" 
-                      transform="rotate(-150 50 50)"
-                    />
-                    <circle 
-                      cx="50" 
-                      cy="50" 
-                      r="38" 
-                      fill="none" 
-                      stroke="#10b981" 
-                      stroke-width="12" 
-                      stroke-dasharray="238" 
-                      stroke-dashoffset="130" 
-                      transform="rotate(30 50 50)"
                     />
                   </svg>
                   <div class="center-text">
-                    <span class="score font-bold">{{ activeReportData.population }}</span>
-                    <span class="label font-bold">Members</span>
+                    <span class="score font-bold">{{ isAnalyzed ? '1' : activeReportData.population }}</span>
+                    <span class="label font-bold" style="font-size: 0.44rem;">{{ isAnalyzed ? 'Individual' : 'Members' }}</span>
                   </div>
                 </div>
 
@@ -954,13 +974,20 @@ function exportCSV() {
             <div class="card chart-card">
               <h4 class="chart-title font-bold">Top Contributing Factors</h4>
               <div class="factors-progress-list">
-                <div v-for="fact in activeReportData.drivers" :key="fact.name" class="factor-progress-item">
-                  <div class="label-row font-semibold">
-                    <span class="name">{{ fact.name }}</span>
-                    <span class="score-val">{{ typeof fact.score === 'number' ? (fact.score % 1 === 0 ? fact.score : fact.score.toFixed(2)) : fact.score }}</span>
+                <div v-for="(fact, index) in activeReportData.drivers" :key="fact.name" class="factor-progress-item">
+                  <div class="factor-icon-bubble" :class="index === 0 ? 'purple' : (index === 1 ? 'green' : 'orange')">
+                    <svg v-if="index === 0" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    <svg v-else-if="index === 1" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="9" x2="12" y2="17"/><line x1="8" y1="13" x2="16" y2="13"/></svg>
+                    <svg v-else viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
                   </div>
-                  <div class="bar-bg">
-                    <div class="bar-fill" :style="{ width: (fact.score * 100) + '%', backgroundColor: fact.color }"></div>
+                  <div class="factor-content">
+                    <div class="label-row font-semibold">
+                      <span class="name">{{ fact.name }}</span>
+                      <span class="score-val">{{ typeof fact.score === 'number' ? (fact.score % 1 === 0 ? fact.score : fact.score.toFixed(2)) : fact.score }}</span>
+                    </div>
+                    <div class="bar-bg">
+                      <div class="bar-fill" :style="{ width: (fact.score * 100) + '%', backgroundColor: fact.color }"></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -974,7 +1001,13 @@ function exportCSV() {
             
             <!-- Table: Risk by geographic area -->
             <div class="card table-card">
-              <h4 class="sec-title font-bold">Risk by Geographic Area (Top 5)</h4>
+              <div class="card-header-with-icon">
+                <span class="card-icon-bubble purple">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </span>
+                <h4 class="sec-title font-bold" style="margin: 0;">Risk by Geographic Area (Top 5)</h4>
+              </div>
+              
               <table class="areas-table">
                 <thead>
                   <tr class="font-bold">
@@ -997,66 +1030,72 @@ function exportCSV() {
 
             <!-- Scatter Plot: Health Outcomes Correlation -->
             <div class="card scatter-card">
-              <div class="scatter-header">
-                <h4 class="sec-title font-bold">Health Outcomes Correlation</h4>
-                <div class="correlation-score-box">
-                  <span class="lbl font-bold">Correlation (r)</span>
-                  <h3 class="val font-bold">{{ activeReportData.correlation }}</h3>
-                  <span class="desc font-bold">{{ activeReportData.correlationLabel }}</span>
-                </div>
-              </div>
+              <h4 class="sec-title font-bold" style="margin-bottom: 8px;">Health Outcomes Correlation</h4>
+              
+              <div class="scatter-body-row">
+                <!-- Left Column: Plot Canvas -->
+                <div class="scatter-plot-col">
+                  <div class="plot-y-axis-lbl font-semibold">Health Outcomes Risk</div>
+                  
+                  <div class="plot-canvas" style="flex: 1;">
+                    <svg viewBox="0 0 350 140" class="scatter-svg">
+                      <!-- Grid background lines -->
+                      <line x1="30" y1="20" x2="330" y2="20" stroke="#f1f5f9" stroke-width="1.2" />
+                      <line x1="30" y1="50" x2="330" y2="50" stroke="#f1f5f9" stroke-width="1.2" />
+                      <line x1="30" y1="80" x2="330" y2="80" stroke="#f1f5f9" stroke-width="1.2" />
+                      <line x1="30" y1="110" x2="330" y2="110" stroke="#f1f5f9" stroke-width="1.2" />
 
-              <div class="scatter-body">
-                <div class="plot-y-axis-lbl font-semibold">Health Outcomes Risk</div>
-                
-                <div class="plot-canvas">
-                  <svg viewBox="0 0 350 140" class="scatter-svg">
-                    <!-- Grid background lines -->
-                    <line x1="30" y1="20" x2="330" y2="20" stroke="#f1f5f9" stroke-width="1.2" />
-                    <line x1="30" y1="50" x2="330" y2="50" stroke="#f1f5f9" stroke-width="1.2" />
-                    <line x1="30" y1="80" x2="330" y2="80" stroke="#f1f5f9" stroke-width="1.2" />
-                    <line x1="30" y1="110" x2="330" y2="110" stroke="#f1f5f9" stroke-width="1.2" />
+                      <!-- Regression dashed line -->
+                      <line x1="35" y1="115" x2="320" y2="35" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="4,4" />
 
-                    <!-- Regression dashed line -->
-                    <line x1="35" y1="115" x2="320" y2="35" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,4" />
+                      <!-- Scatter plot points -->
+                      <circle 
+                        v-for="(dot, idx) in activeReportData.scatterDots" 
+                        :key="idx" 
+                        :cx="dot.x" 
+                        :cy="dot.y" 
+                        r="3.5" 
+                        fill="#8b5cf6" 
+                        opacity="0.85" 
+                      />
+                    </svg>
 
-                    <!-- Scatter plot points -->
-                    <circle 
-                      v-for="(dot, idx) in activeReportData.scatterDots" 
-                      :key="idx" 
-                      :cx="dot.x" 
-                      :cy="dot.y" 
-                      r="2.5" 
-                      fill="#8b5cf6" 
-                      opacity="0.75" 
-                    />
-                  </svg>
-
-                  <!-- Axes ticks -->
-                  <div class="x-ticks-row font-semibold">
-                    <span>0.00</span>
-                    <span>0.25</span>
-                    <span>0.50</span>
-                    <span>0.75</span>
-                    <span>1.00</span>
+                    <!-- Axes ticks -->
+                    <div class="x-ticks-row font-semibold">
+                      <span>0.00</span>
+                      <span>0.25</span>
+                      <span>0.50</span>
+                      <span>0.75</span>
+                      <span>1.00</span>
+                    </div>
+                    <div class="x-axis-title font-semibold">Social Vulnerability Index (SVI)</div>
                   </div>
-                  <div class="x-axis-title font-semibold">Social Vulnerability Index (SVI)</div>
                 </div>
 
-                <div class="plot-explanation">
-                  <p class="explanation font-semibold">Higher social vulnerability is associated with poorer health outcomes.</p>
+                <!-- Right Column: Sidebar Stats -->
+                <div class="scatter-sidebar-col">
+                  <div class="correlation-score-card">
+                    <span class="lbl font-bold">Correlation (R)</span>
+                    <h2 class="val font-bold">{{ activeReportData.correlation }}</h2>
+                    <span class="desc font-semibold">{{ activeReportData.correlationLabel }}</span>
+                  </div>
+
+                  <div class="explanation-box">
+                    <span class="bulb-icon">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .5 2.5 1.5 3.5.7.8 1.3 1.5 1.5 2.5"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/></svg>
+                    </span>
+                    <p class="explanation font-semibold">Higher social vulnerability is associated with poorer health outcomes.</p>
+                  </div>
                 </div>
               </div>
             </div>
 
           </div>
 
-          <div class="data-refreshed-bar">
-            <span class="msg font-semibold"><IconBase name="shield" :size="12" /> Reports are data-driven and evidence-based. All data is aggregated and privacy protected.</span>
-            <div class="right-info font-semibold">
-              <span>Data refreshed: May 31, 2025</span>
-              <span class="secured"><IconBase name="shield" :size="12" /> Data privacy protected</span>
-            </div>
+          <div class="data-refreshed-bar font-semibold">
+            <span class="left-info"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Report generated on May 31, 2025 &bull; 10:24 AM</span>
+            <span class="secured"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Data privacy &amp; security protected</span>
+            <span class="right-info"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Data refreshed May 31, 2025</span>
           </div>
 
         </section>
@@ -1347,17 +1386,52 @@ function exportCSV() {
 /* Highlights stats row */
 .preview-stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .preview-stats-row .stat-mini-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.preview-stats-row .stat-mini-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.stat-mini-card .card-icon-bubble {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-icon-bubble.purple { background: #f5f3ff; color: #8b5cf6; }
+.card-icon-bubble.green { background: #ecfdf5; color: #10b981; }
+.card-icon-bubble.orange { background: #fffbeb; color: #f59e0b; }
+.card-icon-bubble.blue { background: #eff6ff; color: #3b82f6; }
+.card-icon-bubble.red { background: #fff1f2; color: #ef4444; }
+
+.stat-mini-card .card-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .stat-mini-card .lbl {
@@ -1368,15 +1442,19 @@ function exportCSV() {
 
 .stat-mini-card .val-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
+  gap: 4px;
 }
 
 .stat-mini-card h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: var(--text-primary);
+  line-height: 1.2;
+  word-break: break-word;
 }
 
 .stat-mini-card h2 .max {
@@ -1431,8 +1509,8 @@ function exportCSV() {
 }
 
 .donut-svg-wrapper {
-  width: 68px;
-  height: 68px;
+  width: 100px;
+  height: 100px;
   position: relative;
   flex-shrink: 0;
 }
@@ -1454,17 +1532,13 @@ function exportCSV() {
 }
 
 .center-text .score {
-  font-size: 0.72rem;
+  font-size: 1.25rem;
   color: var(--text-primary);
-  max-width: 58px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   text-align: center;
 }
 
 .center-text .label {
-  font-size: 0.52rem;
+  font-size: 0.54rem;
   color: var(--text-tertiary);
   text-transform: uppercase;
 }
@@ -1510,8 +1584,32 @@ function exportCSV() {
 
 .factor-progress-item {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.factor-progress-item .factor-icon-bubble {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.factor-icon-bubble.purple { background: #f5f3ff; color: #8b5cf6; }
+.factor-icon-bubble.green { background: #ecfdf5; color: #10b981; }
+.factor-icon-bubble.orange { background: #fffbeb; color: #f59e0b; }
+
+.factor-progress-item .factor-content {
+  flex: 1;
+  display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .factor-progress-item .label-row {
@@ -1605,44 +1703,119 @@ function exportCSV() {
   text-decoration: underline;
 }
 
-/* Scatter plot card */
-.scatter-header {
+/* Card Header with Icon */
+.card-header-with-icon {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.card-header-with-icon .card-icon-bubble {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.card-header-with-icon .card-icon-bubble.purple {
+  background: #f5f3ff;
+  color: #8b5cf6;
+}
+
+/* View areas button */
+.view-areas-btn {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  color: #8b5cf6;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.view-areas-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Scatter plot card */
+.scatter-body-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.scatter-plot-col {
+  flex: 1.5;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.scatter-sidebar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.correlation-score-card {
+  background: #f5f3ff;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.correlation-score-card .lbl {
+  font-size: 0.52rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.correlation-score-card .val {
+  font-size: 1.25rem;
+  color: #8b5cf6;
+  margin: 0;
+}
+
+.correlation-score-card .desc {
+  font-size: 0.56rem;
+  color: #8b5cf6;
+  display: block;
+  margin-top: 2px;
+}
+
+.explanation-box {
+  background: #f5f3ff;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  gap: 8px;
   align-items: flex-start;
 }
 
-.correlation-score-box {
-  background: #f0f4ff;
-  border: 1px solid #dbeafe;
-  border-radius: 6px;
-  padding: 4px 8px;
-  text-align: right;
-  line-height: 1.15;
-}
-
-.correlation-score-box .lbl {
-  font-size: 0.54rem;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-}
-
-.correlation-score-box .val {
-  margin: 2px 0;
-  font-size: 0.88rem;
-  color: var(--brand);
-}
-
-.correlation-score-box .desc {
-  font-size: 0.54rem;
-  color: var(--brand-dark);
-}
-
-.scatter-body {
-  display: grid;
-  grid-template-columns: 20px 1.5fr 1fr;
-  gap: 8px;
+.explanation-box .bulb-icon {
+  color: #8b5cf6;
+  flex-shrink: 0;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.explanation-box .explanation {
+  margin: 0;
+  font-size: 0.58rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
 }
 
 .plot-y-axis-lbl {
@@ -1683,48 +1856,29 @@ function exportCSV() {
   margin-top: 2px;
 }
 
-.plot-explanation {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.plot-explanation .explanation {
-  margin: 0;
-  font-size: 0.65rem;
-  color: var(--text-secondary);
-  line-height: 1.3;
-}
-
 /* bottom data refreshed bar */
 .data-refreshed-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   color: var(--text-tertiary);
   border-top: 1px solid var(--border);
   padding-top: 12px;
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
-.data-refreshed-bar .msg {
+.data-refreshed-bar .secured {
+  color: var(--text-tertiary);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
+.data-refreshed-bar .left-info,
 .data-refreshed-bar .right-info {
   display: flex;
-  gap: 12px;
   align-items: center;
-}
-
-.secured {
-  color: #10b981;
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 /* Right sidebar panels */
@@ -1925,7 +2079,7 @@ function exportCSV() {
 /* ── RESPONSIVE OVERRIDES ── */
 @media (max-width: 1100px) {
   .preview-stats-row {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
   
   .preview-charts-grid {
@@ -1934,10 +2088,6 @@ function exportCSV() {
 }
 
 @media (max-width: 768px) {
-  .preview-stats-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
   .preview-charts-grid {
     grid-template-columns: 1fr;
   }
@@ -1945,11 +2095,47 @@ function exportCSV() {
   .preview-bottom-grid {
     grid-template-columns: 1fr;
   }
+
+  .scatter-body-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .scatter-plot-col {
+    width: 100%;
+  }
+  
+  .scatter-sidebar-col {
+    width: 100%;
+    flex-direction: row;
+    gap: 8px;
+  }
+  
+  .correlation-score-card,
+  .explanation-box {
+    flex: 1;
+  }
+
+  .data-refreshed-bar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 650px) {
   .preview-stats-row {
     grid-template-columns: 1fr;
+  }
+
+  .preview-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .scatter-sidebar-col {
+    flex-direction: column;
   }
 }
 </style>

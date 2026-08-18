@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
+const microscopeSrc = ref(`/assets/magnifying-glass-fingerprint.gif?t=${Date.now()}`)
 import IconBase from '../components/dashboard/IconBase.vue'
 import { patientData, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
 
@@ -13,11 +13,105 @@ const patientSidebarData = computed(() => {
   }
 })
 
+const diseaseMeta = {
+  diabetes: {
+    name: 'Diabetes',
+    iconColor: '#3b82f6',
+    bgColor: '#eff6ff',
+    barColor: '#3b82f6',
+    iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-4.3-7-11-7-11S5 10.7 5 15a7 7 0 0 0 7 7z"/></svg>`
+  },
+  hypertension: {
+    name: 'Hypertension',
+    iconColor: '#10b981',
+    bgColor: '#ecfdf5',
+    barColor: '#10b981',
+    iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`
+  },
+  heart_disease: {
+    name: 'Heart Disease',
+    iconColor: '#f97316',
+    bgColor: '#fff7ed',
+    barColor: '#f97316',
+    iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`
+  },
+  asthma: {
+    name: 'Asthma',
+    iconColor: '#a855f7',
+    bgColor: '#faf5ff',
+    barColor: '#a855f7',
+    iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3c-1.5 0-3 1-3 3v8c0 2.2 1.8 4 4 4h1a3 3 0 0 0 3-3V6c0-1.7-1.3-3-3-3H6zM18 3c1.5 0 3 1 3 3v8c0 2.2-1.8 4-4 4h-1a3 3 0 0 1-3-3V6c0-1.7 1.3-3 3-3h3z"/><path d="M10 6h4M12 6v14"/></svg>`
+  }
+}
+
+const diseaseList = computed(() => {
+  if (!mlPredictionResults.value?.risk_scores) return []
+  return Object.entries(mlPredictionResults.value.risk_scores).map(([key, val]) => {
+    const meta = diseaseMeta[key] || { name: key.replace('_', ' '), iconColor: '#64748b', bgColor: '#f1f5f9', barColor: '#64748b', iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>` }
+    return {
+      key,
+      val: Math.round(val * 100),
+      name: meta.name,
+      iconColor: meta.iconColor,
+      bgColor: meta.bgColor,
+      barColor: meta.barColor,
+      iconSvg: meta.iconSvg
+    }
+  })
+})
+
+const lastUpdatedDate = computed(() => {
+  const options = { year: 'numeric', month: 'short', day: 'numeric' }
+  const today = new Date()
+  return today.toLocaleDateString('en-US', options)
+})
+
 // Local State
 const selectedId = ref('cuyahoga')
 const activeTrendFilter = ref('all') // 'all', 'hosp', 'util', 'chronic', 'gap'
 const activeGeoTab = ref('county') // 'county', 'zip', 'tract'
 const activeCorrelationOutcome = ref('hosp') // 'hosp', 'util', 'chronic', 'gap'
+
+const isTrendDropdownOpen = ref(false)
+const isCorrelationDropdownOpen = ref(false)
+
+const trendFilterLabel = computed(() => {
+  switch (activeTrendFilter.value) {
+    case 'all': return 'All Risks'
+    case 'hosp': return 'Hospitalization'
+    case 'util': return 'Preventable Utilization'
+    case 'chronic': return 'Chronic Disease'
+    case 'gap': return 'Care Gap'
+    default: return 'All Risks'
+  }
+})
+
+const correlationOutcomeLabel = computed(() => {
+  switch (activeCorrelationOutcome.value) {
+    case 'hosp': return 'Hospitalization Risk'
+    case 'util': return 'Preventable Utilization'
+    case 'chronic': return 'Chronic Disease Risk'
+    case 'gap': return 'Care Gap Probability'
+    default: return 'Hospitalization Risk'
+  }
+})
+
+const closeDropdowns = (e) => {
+  if (!e.target.closest('.filter-dropdown-wrapper')) {
+    isTrendDropdownOpen.value = false
+  }
+  if (!e.target.closest('.correlation-dropdown-wrapper')) {
+    isCorrelationDropdownOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeDropdowns)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeDropdowns)
+})
 
 // Form filters state
 const filterPopulation = ref('All Members')
@@ -704,99 +798,222 @@ function handleLocationFilterChange(e) {
         </header>
 
         <!-- Active Patient Predictive Insights -->
-        <section v-if="isAnalyzed" class="card active-patient-prediction-panel" style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); color: white; border: none; border-radius: var(--radius-lg); padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(49, 46, 129, 0.2);">
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="background: #ffffff; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 4px; flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <img :src="microscopeSrc" alt="AI Analysis" style="width: 32px; height: 32px; object-fit: contain;" />
+        <!-- Active Patient Predictive Insights -->
+        <section v-if="isAnalyzed" class="premium-patient-panel">
+          
+          <!-- Panel Header Row -->
+          <div class="panel-header">
+            <div class="panel-header-left">
+              <div class="avatar-circle">
+                <img :src="microscopeSrc" alt="AI Analysis" class="avatar-gif" />
               </div>
-              <div>
-                <h3 style="margin: 0; color: white; font-size: 1.25rem; font-weight: 800;">Patient Risk Profile: {{ patientData.name }}</h3>
-                <p style="margin: 4px 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.7);">
-                  Real-time clinical and geographic risk assessment powered by random forest and gradient boosted estimators.
+              <div class="header-texts">
+                <h3>Patient Risk Profile: <span class="patient-name">{{ patientData.name }}</span></h3>
+                <p>
+                  Real-time clinical and geographic risk assessment powered by Random Forest and Gradient Boosted estimators.
                 </p>
               </div>
             </div>
-            <div style="text-align: right;">
-              <span style="background: rgba(255,255,255,0.1); padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; color: #a5b4fc;">
+            
+            <div class="panel-header-right">
+              <span class="bmi-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
                 BMI: {{ ((patientData.weight_kg) / ((patientData.height_cm / 100) * (patientData.height_cm / 100))).toFixed(1) }} ({{ patientData.height_cm }}cm / {{ patientData.weight_kg }}kg)
               </span>
             </div>
           </div>
 
-          <div style="display: flex; flex-wrap: wrap; gap: 24px;">
-            <!-- Column 1: Overall Score Radial Gauge -->
-            <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); padding: 20px; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.05);">
-              <p style="margin: 0 0 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.7);">Patient Health Score</p>
-              <div class="circle-gauge" style="width: 100px; height: 100px; position: relative; margin-bottom: 12px;">
-                <svg width="100" height="100" viewBox="0 0 36 36" class="circular-chart" style="width: 100%; height: 100%;">
-                  <path class="circle-bg" style="stroke: rgba(255,255,255,0.1); fill: none; stroke-width: 2.8;" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                  <path class="circle" style="stroke: #818cf8; fill: none; stroke-width: 2.8; stroke-linecap: round;" :stroke-dasharray="patientSidebarData.equityScore + ', 100'" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          <!-- Main Layout Columns -->
+          <div class="panel-cols-grid">
+            
+            <!-- Column 1: Patient Health Score -->
+            <div class="panel-col col-health-score">
+              <div class="col-header">
+                <span class="col-badge purple">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                </span>
+                <span class="col-title">Patient Health Score</span>
+              </div>
+              
+              <!-- Circular Progress Gauge -->
+              <div class="radial-gauge-wrapper">
+                <svg width="120" height="120" viewBox="0 0 36 36" class="premium-gauge">
+                  <!-- Background Track -->
+                  <path class="gauge-track" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#f1f5f9" stroke-width="2.5" />
+                  <!-- Foreground Gradient Bar -->
+                  <path class="gauge-bar" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="url(#healthScoreGrad)" stroke-width="2.5" :stroke-dasharray="patientSidebarData.equityScore + ', 100'" stroke-linecap="round" />
+                  <defs>
+                    <linearGradient id="healthScoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#3b82f6" />
+                      <stop offset="100%" stop-color="#a855f7" />
+                    </linearGradient>
+                  </defs>
                 </svg>
-                <div class="gauge-center" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center;">
-                  <span class="score-num" style="font-size: 22px; font-weight: 800; color: white;">{{ patientSidebarData.equityScore }}</span>
-                  <span class="score-den" style="font-size: 10px; color: rgba(255,255,255,0.5);">/100</span>
+                <div class="gauge-inner-text">
+                  <span class="score-number">{{ patientSidebarData.equityScore }}</span>
+                  <span class="score-total">/100</span>
                 </div>
               </div>
-              <span class="gauge-level-badge font-bold" :class="patientSidebarData.equityLevel.toLowerCase().replace(' ', '-')" style="font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; color: white; display: inline-block;">
-                {{ patientSidebarData.equityLevel }}
-              </span>
-              <p style="margin: 8px 0 0; font-size: 0.75rem; opacity: 0.7;">Health Gap: {{ 100 - patientSidebarData.equityScore }} pts vs National Avg</p>
+
+              <!-- Risk Level Badge -->
+              <div class="risk-badge-wrapper">
+                <span v-if="patientSidebarData.equityLevel === 'Low Risk'" class="premium-risk-badge low-risk">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="badge-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 11 2 2 4-4"/></svg>
+                  Low Risk
+                </span>
+                <span v-else-if="patientSidebarData.equityLevel === 'Moderate'" class="premium-risk-badge moderate">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="badge-icon"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Moderate Risk
+                </span>
+                <span v-else class="premium-risk-badge high-risk">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="badge-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  {{ patientSidebarData.equityLevel }}
+                </span>
+              </div>
+
+              <!-- Gap details -->
+              <div class="score-gap-row">
+                <span class="gap-title">Health Gap: <b>{{ 100 - patientSidebarData.equityScore }} pts</b></span>
+                <span class="gap-sub">vs National Avg</span>
+              </div>
+              
+              <!-- Bottom wave decoration -->
+              <div class="col-wave-decor">
+                <svg viewBox="0 0 120 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M0 15 C 30 28, 60 2, 120 15 L 120 28 L 0 28 Z" fill="#faf5ff" opacity="0.6"/>
+                  <path d="M0 20 C 40 10, 80 25, 120 15 L 120 28 L 0 28 Z" fill="#f3e8ff" opacity="0.4"/>
+                </svg>
+              </div>
             </div>
 
             <!-- Column 2: Disease Risk Predictions -->
-            <div style="flex: 2; min-width: 300px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; justify-content: space-between;">
-              <p style="margin: 0 0 16px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.7);">Clinical Disease Risk Probabilities</p>
-              
-              <div v-if="mlPredictionResults" style="display: flex; flex-direction: column; gap: 14px;">
-                <div v-for="(val, disease) in mlPredictionResults.risk_scores" :key="disease">
-                  <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px;">
-                    <span style="text-transform: capitalize; font-weight: 700; color: rgba(255,255,255,0.9);">{{ disease.replace('_', ' ') }}</span>
-                    <span style="font-weight: 800; color: white;">{{ Math.round(val * 100) }}%</span>
+            <div class="panel-col col-disease-risks">
+              <div class="col-header">
+                <span class="col-badge green">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </span>
+                <span class="col-title">Clinical Disease Risk Probabilities</span>
+              </div>
+
+              <div class="disease-list" v-if="mlPredictionResults">
+                <div v-for="item in diseaseList" :key="item.key" class="disease-item-row">
+                  <div class="disease-icon-wrapper" :style="{ backgroundColor: item.bgColor }">
+                    <span v-html="item.iconSvg"></span>
                   </div>
-                  <div style="height: 8px; background-color: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; display: flex;">
-                    <div :style="{ width: (val * 100) + '%', backgroundColor: val > 0.7 ? '#f87171' : (val > 0.4 ? '#fbbf24' : '#34d399') }" style="height: 100%; border-radius: 4px;"></div>
+                  <div class="disease-info-block">
+                    <div class="disease-name-row">
+                      <span class="disease-name">{{ item.name }}</span>
+                      <span class="disease-pct" :style="{ color: item.iconColor }">{{ item.val }}%</span>
+                    </div>
+                    <div class="disease-bar-track">
+                      <div class="disease-bar-fill" :style="{ width: item.val + '%', backgroundColor: item.barColor }"></div>
+                    </div>
                   </div>
                 </div>
+              </div>
+              
+              <div class="col-footer-note">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="color: #10b981; flex-shrink: 0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+                <span>Probabilities indicate the estimated risk of developing the condition.</span>
               </div>
             </div>
 
-            <!-- Column 3: Geocoded Location SDoH Risk -->
-            <div style="flex: 2; min-width: 300px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; justify-content: space-between;">
-              <p style="margin: 0 0 16px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.7);">Geocoded Location SDOH Barriers</p>
-              
-              <div v-if="predictionModelResults" style="display: flex; flex-direction: column; gap: 12px; font-size: 0.8rem;">
-                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
-                  <span style="color: rgba(255,255,255,0.7);">Estimated Location</span>
-                  <b style="color: white;">{{ predictionModelResults.city }}, {{ predictionModelResults.state }}</b>
+            <!-- Column 3: Geocoded Location SDOH Risk -->
+            <div class="panel-col col-location-barriers">
+              <div class="col-header">
+                <span class="col-badge blue">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </span>
+                <span class="col-title">Geocoded Location SDOH Barriers</span>
+              </div>
+
+              <div class="location-map-panel" v-if="predictionModelResults">
+                <div class="location-text-details">
+                  <span class="loc-label">Estimated Location</span>
+                  <span class="loc-value">{{ predictionModelResults.city }}, {{ predictionModelResults.state }}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
-                  <span style="color: rgba(255,255,255,0.7);">SVI Risk Score</span>
-                  <b style="color: #f87171;">{{ predictionModelResults.overall_risk_score.toFixed(2) }} ({{ predictionModelResults.overall_risk_category }})</b>
+                <div class="map-bg-wrapper">
+                  <img src="/assets/location-map.png" alt="Location Map" class="map-bg-img" />
+                  <div class="map-bg-fade"></div>
                 </div>
-                
-                <!-- Individual SDoH scores -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-                  <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                    <span style="font-size: 0.7rem; color: rgba(255,255,255,0.5); display: block;">Healthcare Access</span>
-                    <b style="color: white; font-size: 0.85rem;">{{ Math.round(predictionModelResults.scores.healthcare_access * 100) }}%</b>
+              </div>
+
+              <div class="svi-score-row" v-if="predictionModelResults">
+                <span class="svi-label">SVI Risk Score <span class="help-dot">?</span></span>
+                <span class="svi-value" :class="predictionModelResults.overall_risk_category.toLowerCase()">
+                  {{ predictionModelResults.overall_risk_score.toFixed(2) }} ({{ predictionModelResults.overall_risk_category }})
+                </span>
+              </div>
+
+              <!-- 2x2 grid of SDOH scores -->
+              <div class="sdoh-mini-grid" v-if="predictionModelResults">
+                <!-- Healthcare Access -->
+                <div class="sdoh-mini-card">
+                  <div class="mini-card-icon blue">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
                   </div>
-                  <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                    <span style="font-size: 0.7rem; color: rgba(255,255,255,0.5); display: block;">Social Context</span>
-                    <b style="color: white; font-size: 0.85rem;">{{ Math.round(predictionModelResults.scores.social_context * 100) }}%</b>
+                  <div class="mini-card-text">
+                    <span class="mini-lbl">Healthcare Access</span>
+                    <span class="mini-val">{{ Math.round(predictionModelResults.scores.healthcare_access * 100) }}%</span>
                   </div>
-                  <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                    <span style="font-size: 0.7rem; color: rgba(255,255,255,0.5); display: block;">Food Security</span>
-                    <b style="color: white; font-size: 0.85rem;">{{ Math.round(predictionModelResults.scores.food_security * 100) }}%</b>
+                </div>
+
+                <!-- Social Context -->
+                <div class="sdoh-mini-card">
+                  <div class="mini-card-icon purple">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                   </div>
-                  <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                    <span style="font-size: 0.7rem; color: rgba(255,255,255,0.5); display: block;">Neighborhood Env</span>
-                    <b style="color: white; font-size: 0.85rem;">{{ Math.round(predictionModelResults.scores.neighborhood_environment * 100) }}%</b>
+                  <div class="mini-card-text">
+                    <span class="mini-lbl">Social Context</span>
+                    <span class="mini-val">{{ Math.round(predictionModelResults.scores.social_context * 100) }}%</span>
+                  </div>
+                </div>
+
+                <!-- Food Security -->
+                <div class="sdoh-mini-card">
+                  <div class="mini-card-icon green">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2 M6 2v7 M9 2v7 M7 11v11"/></svg>
+                  </div>
+                  <div class="mini-card-text">
+                    <span class="mini-lbl">Food Security</span>
+                    <span class="mini-val">{{ Math.round(predictionModelResults.scores.food_security * 100) }}%</span>
+                  </div>
+                </div>
+
+                <!-- Neighborhood Environment -->
+                <div class="sdoh-mini-card">
+                  <div class="mini-card-icon orange">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                  </div>
+                  <div class="mini-card-text">
+                    <span class="mini-lbl">Neighborhood Env</span>
+                    <span class="mini-val">{{ Math.round(predictionModelResults.scores.neighborhood_environment * 100) }}%</span>
                   </div>
                 </div>
               </div>
             </div>
+            
           </div>
+
+          <!-- Bottom Footer Banner -->
+          <div class="panel-footer-banner">
+            <div class="footer-left">
+              <span class="footer-icon-shield">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </span>
+              <span>AI-driven insights for proactive care and better outcomes.</span>
+            </div>
+            <div class="footer-right">
+              <span class="footer-icon-cal">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </span>
+              <span>Last updated: {{ lastUpdatedDate }} • 10:30 AM</span>
+            </div>
+          </div>
+
         </section>
 
         <!-- Predictive Cards Top Row -->
@@ -813,18 +1030,7 @@ function handleLocationFilterChange(e) {
                 {{ activeCommunity.metrics.hospRisk.trend }}
               </span>
             </div>
-            <div class="sparkline-container">
-              <svg viewBox="0 0 80 30" class="spark-svg">
-                <path 
-                  fill="none" 
-                  stroke="#3b82f6" 
-                  stroke-width="1.8" 
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :d="'M ' + getSparklinePoints(activeCommunity.metrics.hospRisk.sparkline)" 
-                />
-              </svg>
-            </div>
+
           </div>
 
           <!-- Card 2: Preventable Utilization -->
@@ -839,18 +1045,7 @@ function handleLocationFilterChange(e) {
                 {{ activeCommunity.metrics.utilRisk.trend }}
               </span>
             </div>
-            <div class="sparkline-container">
-              <svg viewBox="0 0 80 30" class="spark-svg">
-                <path 
-                  fill="none" 
-                  stroke="#10b981" 
-                  stroke-width="1.8" 
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :d="'M ' + getSparklinePoints(activeCommunity.metrics.utilRisk.sparkline)" 
-                />
-              </svg>
-            </div>
+
           </div>
 
           <!-- Card 3: Chronic Disease Risk -->
@@ -865,18 +1060,7 @@ function handleLocationFilterChange(e) {
                 {{ activeCommunity.metrics.chronicRisk.trend }}
               </span>
             </div>
-            <div class="sparkline-container">
-              <svg viewBox="0 0 80 30" class="spark-svg">
-                <path 
-                  fill="none" 
-                  stroke="#8b5cf6" 
-                  stroke-width="1.8" 
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :d="'M ' + getSparklinePoints(activeCommunity.metrics.chronicRisk.sparkline)" 
-                />
-              </svg>
-            </div>
+
           </div>
 
           <!-- Card 4: Core Gap Probability -->
@@ -891,18 +1075,7 @@ function handleLocationFilterChange(e) {
                 {{ activeCommunity.metrics.gapProb.trend }}
               </span>
             </div>
-            <div class="sparkline-container">
-              <svg viewBox="0 0 80 30" class="spark-svg">
-                <path 
-                  fill="none" 
-                  stroke="#f59e0b" 
-                  stroke-width="1.8" 
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :d="'M ' + getSparklinePoints(activeCommunity.metrics.gapProb.sparkline)" 
-                />
-              </svg>
-            </div>
+
           </div>
 
           <!-- Card 5: SDOH Impact Score -->
@@ -917,18 +1090,7 @@ function handleLocationFilterChange(e) {
                 {{ activeCommunity.metrics.sdohImpact.trend }}
               </span>
             </div>
-            <div class="sparkline-container">
-              <svg viewBox="0 0 80 30" class="spark-svg">
-                <path 
-                  fill="none" 
-                  stroke="#10b981" 
-                  stroke-width="1.8" 
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :d="'M ' + getSparklinePoints(activeCommunity.metrics.sdohImpact.sparkline)" 
-                />
-              </svg>
-            </div>
+
           </div>
         </section>
 
@@ -950,12 +1112,22 @@ function handleLocationFilterChange(e) {
                     <h4>Risk Trends Over Time <span class="info-tooltip-btn"><IconBase name="help" :size="11" /></span></h4>
                   </div>
                   
-                  <div class="toggle-pill-wrapper">
-                    <button class="toggle-pill-btn" :class="{ active: activeTrendFilter === 'all' }" @click="activeTrendFilter = 'all'">All Risks</button>
-                    <button class="toggle-pill-btn" :class="{ active: activeTrendFilter === 'hosp' }" @click="activeTrendFilter = 'hosp'">Hospitalization</button>
-                    <button class="toggle-pill-btn" :class="{ active: activeTrendFilter === 'util' }" @click="activeTrendFilter = 'util'">Preventable Utilization</button>
-                    <button class="toggle-pill-btn" :class="{ active: activeTrendFilter === 'chronic' }" @click="activeTrendFilter = 'chronic'">Chronic Disease</button>
-                    <button class="toggle-pill-btn" :class="{ active: activeTrendFilter === 'gap' }" @click="activeTrendFilter = 'gap'">Care Gap</button>
+                  <div class="filter-dropdown-wrapper">
+                    <button class="filter-dropdown-btn" @click.stop="isTrendDropdownOpen = !isTrendDropdownOpen">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter-icon"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                      <span>{{ trendFilterLabel }}</span>
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    
+                    <transition name="dropdown-fade">
+                      <div class="filter-dropdown-menu" v-if="isTrendDropdownOpen">
+                        <button class="dropdown-item" :class="{ active: activeTrendFilter === 'all' }" @click="activeTrendFilter = 'all'; isTrendDropdownOpen = false">All Risks</button>
+                        <button class="dropdown-item" :class="{ active: activeTrendFilter === 'hosp' }" @click="activeTrendFilter = 'hosp'; isTrendDropdownOpen = false">Hospitalization</button>
+                        <button class="dropdown-item" :class="{ active: activeTrendFilter === 'util' }" @click="activeTrendFilter = 'util'; isTrendDropdownOpen = false">Preventable Utilization</button>
+                        <button class="dropdown-item" :class="{ active: activeTrendFilter === 'chronic' }" @click="activeTrendFilter = 'chronic'; isTrendDropdownOpen = false">Chronic Disease</button>
+                        <button class="dropdown-item" :class="{ active: activeTrendFilter === 'gap' }" @click="activeTrendFilter = 'gap'; isTrendDropdownOpen = false">Care Gap</button>
+                      </div>
+                    </transition>
                   </div>
                 </div>
 
@@ -1236,12 +1408,21 @@ function handleLocationFilterChange(e) {
 
               <div class="select-outcome-wrapper">
                 <span class="axis-lbl">Y-Axis</span>
-                <select v-model="activeCorrelationOutcome" class="select-outcome">
-                  <option value="hosp">Hospitalization Risk</option>
-                  <option value="util">Preventable Utilization</option>
-                  <option value="chronic">Chronic Disease Risk</option>
-                  <option value="gap">Care Gap Probability</option>
-                </select>
+                <div class="correlation-dropdown-wrapper">
+                  <button class="filter-dropdown-btn" @click.stop="isCorrelationDropdownOpen = !isCorrelationDropdownOpen">
+                    <span>{{ correlationOutcomeLabel }}</span>
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  
+                  <transition name="dropdown-fade">
+                    <div class="filter-dropdown-menu left-align" v-if="isCorrelationDropdownOpen">
+                      <button class="dropdown-item" :class="{ active: activeCorrelationOutcome === 'hosp' }" @click="activeCorrelationOutcome = 'hosp'; isCorrelationDropdownOpen = false">Hospitalization Risk</button>
+                      <button class="dropdown-item" :class="{ active: activeCorrelationOutcome === 'util' }" @click="activeCorrelationOutcome = 'util'; isCorrelationDropdownOpen = false">Preventable Utilization</button>
+                      <button class="dropdown-item" :class="{ active: activeCorrelationOutcome === 'chronic' }" @click="activeCorrelationOutcome = 'chronic'; isCorrelationDropdownOpen = false">Chronic Disease Risk</button>
+                      <button class="dropdown-item" :class="{ active: activeCorrelationOutcome === 'gap' }" @click="activeCorrelationOutcome = 'gap'; isCorrelationDropdownOpen = false">Care Gap Probability</button>
+                    </div>
+                  </transition>
+                </div>
               </div>
 
               <!-- Scatter Plot SVG Area -->
@@ -1607,29 +1788,100 @@ function handleLocationFilterChange(e) {
   cursor: pointer;
 }
 
-.toggle-pill-wrapper {
-  display: flex;
-  background: #f1f5f9;
-  border-radius: 8px;
-  padding: 2.5px;
+.filter-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
 }
 
-.toggle-pill-btn {
-  border: none;
-  background: transparent;
-  padding: 4px 8px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  border-radius: 6px;
+.correlation-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.filter-dropdown-menu.left-align {
+  left: 0;
+  right: auto;
+}
+
+.filter-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #475569;
   cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   white-space: nowrap;
 }
 
-.toggle-pill-btn.active {
+.filter-dropdown-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.filter-icon,
+.chevron-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.filter-dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
   background: #ffffff;
-  color: var(--brand);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  z-index: 50;
+  min-width: 180px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: #475569;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.dropdown-item.active {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+/* Dropdown Animation */
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .svg-graph-container {
@@ -2381,6 +2633,533 @@ function handleLocationFilterChange(e) {
   font-weight: 600;
 }
 
+/* ── PREMIUM ACTIVE PATIENT PROFILE ── */
+.premium-patient-panel {
+  background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.02);
+  margin-bottom: 24px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatar-circle {
+  background: #ffffff;
+  border: 1px solid #c7d2fe;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+  flex-shrink: 0;
+}
+
+.avatar-gif {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.header-texts h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.patient-name {
+  color: var(--brand);
+}
+
+.header-texts p {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.bmi-badge {
+  background: #eff6ff;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-cols-grid {
+  display: grid;
+  grid-template-columns: 240px 1fr 1fr;
+  gap: 20px;
+  padding: 24px;
+}
+
+.panel-col {
+  background: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.005);
+}
+
+.col-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.col-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.col-badge.purple {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.col-badge.green {
+  background: #dcfce7;
+  color: #10b981;
+}
+
+.col-badge.blue {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.col-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.col-health-score {
+  align-items: center;
+  justify-content: space-between;
+  min-height: 290px;
+}
+
+.radial-gauge-wrapper {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0;
+}
+
+.premium-gauge {
+  transform: rotate(-90deg);
+}
+
+.gauge-track {
+  stroke: #f1f5f9;
+}
+
+.gauge-bar {
+  transition: stroke-dasharray 0.5s ease;
+}
+
+.gauge-inner-text {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-number {
+  font-size: 32px;
+  font-weight: 850;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.score-total {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.risk-badge-wrapper {
+  margin: 8px 0;
+}
+
+.premium-risk-badge {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.premium-risk-badge.low-risk {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.premium-risk-badge.moderate {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.premium-risk-badge.high-risk,
+.premium-risk-badge.critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.badge-icon {
+  flex-shrink: 0;
+}
+
+.score-gap-row {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.gap-title {
+  font-size: 0.76rem;
+  color: #475569;
+}
+
+.gap-sub {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.col-wave-decor {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  pointer-events: none;
+}
+
+.disease-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.disease-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.disease-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.disease-info-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.disease-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.disease-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.disease-pct {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.disease-bar-track {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.disease-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.col-footer-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 0.68rem;
+  color: #64748b;
+  line-height: 1.25;
+}
+
+.location-map-panel {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+  min-height: 84px;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+}
+
+.location-text-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  z-index: 2;
+}
+
+.loc-label {
+  font-size: 0.68rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.loc-value {
+  font-size: 1.15rem;
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.map-bg-wrapper {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.map-bg-img {
+  width: 60%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right 15%;
+  position: absolute;
+  right: 0;
+}
+
+.map-bg-fade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(to right, #ffffff 40%, rgba(255, 255, 255, 0.8) 55%, rgba(255, 255, 255, 0) 100%);
+}
+
+.svi-score-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.svi-label {
+  font-size: 0.72rem;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.help-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  cursor: help;
+}
+
+.svi-value {
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.svi-value.low {
+  color: #10b981;
+}
+
+.svi-value.medium,
+.svi-value.moderate {
+  color: #f59e0b;
+}
+
+.svi-value.high,
+.svi-value.very-high,
+.svi-value.critical {
+  color: #ef4444;
+}
+
+.sdoh-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sdoh-mini-card {
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mini-card-icon.blue {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.mini-card-icon.purple {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.mini-card-icon.green {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.mini-card-icon.orange {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.mini-card-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-lbl {
+  font-size: 0.62rem;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mini-val {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.panel-footer-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(248, 250, 252, 0.65);
+  border-top: 1px solid #f1f5f9;
+  padding: 12px 24px;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.footer-left,
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-icon-shield {
+  color: #4f46e5;
+  display: flex;
+  align-items: center;
+}
+
+.footer-icon-cal {
+  color: #64748b;
+  display: flex;
+  align-items: center;
+}
+
 /* ── RESPONSIVE OVERRIDES ── */
 @media (max-width: 1280px) {
   .geographic-radar-row {
@@ -2395,6 +3174,23 @@ function handleLocationFilterChange(e) {
 
   .predictive-cards-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .panel-cols-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .col-health-score {
+    grid-column: span 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-around;
+    min-height: auto;
+    padding: 24px;
+    gap: 16px;
+  }
+  .col-wave-decor {
+    display: none;
   }
 }
 
@@ -2412,6 +3208,36 @@ function handleLocationFilterChange(e) {
   .geographic-radar-row {
     grid-template-columns: 1fr;
   }
+
+  .panel-cols-grid {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .col-health-score {
+    grid-column: span 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+  .col-wave-decor {
+    display: block;
+  }
+  .col-disease-risks, .col-location-barriers {
+    grid-column: span 1;
+  }
+  .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+  }
+  .panel-footer-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 16px;
+  }
 }
 
 @media (max-width: 600px) {
@@ -2425,6 +3251,12 @@ function handleLocationFilterChange(e) {
     gap: 12px;
     height: auto;
     padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sdoh-mini-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
