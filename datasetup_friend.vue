@@ -36,6 +36,7 @@ const handleLogout = async () => {
   localStorage.removeItem('docpat_logged_in')
   localStorage.removeItem('user_email')
   localStorage.removeItem('user_name')
+  userHistory.value = []
   setLoggedIn(false)
 }
 
@@ -52,14 +53,7 @@ const fetchUserHistory = async () => {
   }
   isLoadingHistory.value = true
   try {
-    const userEmail = localStorage.getItem('user_email')
-    const userId = localStorage.getItem('user_id') || 1
-    
-    const fetchUrl = userEmail 
-      ? `${MAIN_BACKEND_URL}/api/history/email/${encodeURIComponent(userEmail)}`
-      : `${MAIN_BACKEND_URL}/api/history/user/${userId}`
-      
-    const res = await fetch(fetchUrl)
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/history/user/1`)
     if (res.ok) {
       const data = await res.json()
       userHistory.value = data
@@ -105,6 +99,22 @@ onMounted(() => {
   }
 })
 
+const formatDate = (isoStr) => {
+  if (!isoStr) return 'Recently'
+  const d = new Date(isoStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+const downloadHistoryItem = (item) => {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(item, null, 2))
+  const downloadAnchor = document.createElement('a')
+  downloadAnchor.setAttribute("href", dataStr)
+  downloadAnchor.setAttribute("download", `patient_assessment_${item.name || item.id || 'record'}.json`)
+  document.body.appendChild(downloadAnchor)
+  downloadAnchor.click()
+  downloadAnchor.remove()
+}
+
 const viewHistoryItem = (item) => {
   if (item) {
     setPatientData({
@@ -132,22 +142,6 @@ const viewHistoryItem = (item) => {
   }
   setAnalyzed(true)
   router.push('/')
-}
-
-const formatDate = (isoStr) => {
-  if (!isoStr) return 'Recently'
-  const d = new Date(isoStr)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-const downloadHistoryItem = (item) => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(item, null, 2))
-  const downloadAnchor = document.createElement('a')
-  downloadAnchor.setAttribute("href", dataStr)
-  downloadAnchor.setAttribute("download", `patient_assessment_${item.name || item.id || 'record'}.json`)
-  document.body.appendChild(downloadAnchor)
-  downloadAnchor.click()
-  downloadAnchor.remove()
 }
 
 // Form states
