@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from '../store/appState'
-import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from '../config'
-import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
+import IconBase from './src/components/dashboard/IconBase.vue'
+import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from './src/store/appState'
+import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from './src/config'
+import { US_STATES, US_COUNTIES_BY_STATE } from './src/data/usData.js'
 
 const router = useRouter()
 
