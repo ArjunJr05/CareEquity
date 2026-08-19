@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
-import FloatingChatbot from '../components/dashboard/FloatingChatbot.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
@@ -839,7 +838,6 @@ const handleSendMessage = () => {
         </div>
       </div>
     </aside>
-    <FloatingChatbot />
   </div>
 </template>
 
