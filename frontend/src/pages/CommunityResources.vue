@@ -12,9 +12,26 @@ const searchQuery = ref('')
 const activeCategoryFilter = ref('all') // 'all', 'food', 'health', 'mental', 'transit', 'housing', 'social', 'pharmacy', 'other'
 const viewMode = ref('map') // 'map' or 'list'
 const radiusFilter = ref('25 miles')
+const isRadiusDropdownOpen = ref(false)
+const radiusOptionsList = ['10 miles', '25 miles', '50 miles']
+const selectRadius = (val) => {
+  radiusFilter.value = val
+  isRadiusDropdownOpen.value = false
+}
 
 // Selected resource for the detail rail
 const selectedResource = ref(null)
+
+const isCategoryDropdownOpen = ref(false)
+const activeCategoryLabel = computed(() => {
+  const matched = chips.value.find(c => c.id === activeCategoryFilter.value)
+  return matched ? matched.label : 'All'
+})
+const closeCategoryDropdown = (e) => {
+  if (!e.target.closest('.category-dropdown-wrapper')) {
+    isCategoryDropdownOpen.value = false
+  }
+}
 
 // Toast notification state
 const toastMsg = ref('')
@@ -388,18 +405,18 @@ const currentResources = computed(() => {
 const chips = computed(() => {
   if (isAnalyzed.value) {
     return [
-      { id: 'all', label: 'All', icon: 'puzzle', colorClass: 'grey' },
-      { id: 'food', label: 'Food Access', icon: 'pin', colorClass: 'orange' },
-      { id: 'clinic', label: 'Healthcare Clinics', icon: 'pulse', colorClass: 'green' },
-      { id: 'gym', label: 'Fitness & Gyms', icon: 'heart', colorClass: 'purple' },
-      { id: 'park', label: 'Parks & Green Space', icon: 'home', colorClass: 'blue' }
+      { id: 'all', label: 'All', imgSrc: '/assets/infinity.png', colorClass: 'grey' },
+      { id: 'food', label: 'Food Access', imgSrc: '/assets/fork-and-knife.png', colorClass: 'orange' },
+      { id: 'clinic', label: 'Healthcare Clinics', imgSrc: '/assets/healthcare.png', colorClass: 'green' },
+      { id: 'gym', label: 'Fitness & Gyms', imgSrc: '/assets/dumbbell.png', colorClass: 'purple' },
+      { id: 'park', label: 'Parks & Green Space', imgSrc: '/assets/park.png', colorClass: 'blue' }
     ]
   } else {
     return [
-      { id: 'all', label: 'All', icon: 'puzzle', colorClass: 'grey' },
-      { id: 'food', label: 'Food Access', icon: 'pin', colorClass: 'orange' },
-      { id: 'health', label: 'Healthcare', icon: 'pulse', colorClass: 'green' },
-      { id: 'mental', label: 'Mental Health', icon: 'heart', colorClass: 'purple' },
+      { id: 'all', label: 'All', imgSrc: '/assets/infinity.png', colorClass: 'grey' },
+      { id: 'food', label: 'Food Access', imgSrc: '/assets/fork-and-knife.png', colorClass: 'orange' },
+      { id: 'health', label: 'Healthcare', imgSrc: '/assets/healthcare.png', colorClass: 'green' },
+      { id: 'mental', label: 'Mental Health', imgSrc: '/assets/dumbbell.png', colorClass: 'purple' },
       { id: 'transit', label: 'Transportation', icon: 'trend', colorClass: 'blue' },
       { id: 'housing', label: 'Housing', icon: 'home', colorClass: 'pink' },
       { id: 'social', label: 'Social Services', icon: 'users', colorClass: 'rose' }
@@ -569,6 +586,19 @@ function getCategoryIcon(cat) {
   }
 }
 
+function getCategoryImgSrc(cat) {
+  switch(cat) {
+    case 'all': return '/assets/infinity.png'
+    case 'food': return '/assets/fork-and-knife.png'
+    case 'health':
+    case 'clinic': return '/assets/healthcare.png'
+    case 'mental':
+    case 'gym': return '/assets/dumbbell.png'
+    case 'park': return '/assets/park.png'
+    default: return null
+  }
+}
+
 function openResourceWebsite(website) {
   if (!website) return
   const url = website.startsWith('http') ? website : 'https://' + website
@@ -672,11 +702,19 @@ watch(isAnalyzed, (newVal) => {
   }
 })
 
+watch(selectedId, () => {
+  const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
+  const lon = isAnalyzed.value ? patientData.value.long : centerLngForCounty(selectedId.value)
+  fetchScrapedResources(lat, lon)
+})
+
 // Initialize resources data and map
 onMounted(() => {
   const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
   const lon = isAnalyzed.value ? patientData.value.long : centerLngForCounty(selectedId.value)
   fetchScrapedResources(lat, lon)
+
+  document.addEventListener('click', closeCategoryDropdown)
 
   setTimeout(() => {
     initMap()
@@ -684,6 +722,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', closeCategoryDropdown)
   if (map) {
     map.remove()
   }
@@ -728,53 +767,76 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="filter-item radius-col" style="flex: 0 0 160px;">
+          <div class="filter-item radius-col custom-radius-dropdown">
             <span class="lbl">Radius</span>
-            <select v-model="radiusFilter" class="filter-select">
-              <option value="10 miles">10 miles</option>
-              <option value="25 miles">25 miles</option>
-              <option value="50 miles">50 miles</option>
-            </select>
+            <div class="custom-radius-trigger" style="position: relative;" @click="isRadiusDropdownOpen = !isRadiusDropdownOpen">
+              <span class="selected-val font-bold">{{ radiusFilter }}</span>
+              <span class="chevron-icon" :class="{ open: isRadiusDropdownOpen }">
+                <IconBase name="chevron-down" :size="12" />
+              </span>
+
+              <!-- Custom Menu Popover -->
+              <transition name="menu-fade">
+                <ul v-if="isRadiusDropdownOpen" class="custom-radius-menu" @click.stop>
+                  <li 
+                    v-for="opt in radiusOptionsList" 
+                    :key="opt"
+                    class="radius-menu-item"
+                    :class="{ active: radiusFilter === opt }"
+                    @click="selectRadius(opt)"
+                  >
+                    <span class="item-text font-semibold">{{ opt }}</span>
+                    <span v-if="radiusFilter === opt" class="active-check">✓</span>
+                  </li>
+                </ul>
+              </transition>
+            </div>
+
+            <!-- Backdrop -->
+            <div v-if="isRadiusDropdownOpen" class="dropdown-backdrop" @click="isRadiusDropdownOpen = false"></div>
           </div>
         </section>
 
-        <!-- Category Chips Row -->
-        <section class="category-chips-row">
-          <button 
-            v-for="chip in chips"
-            :key="chip.id"
-            class="chip-item" 
-            :class="{ active: activeCategoryFilter === chip.id, [chip.colorClass]: true }"
-            @click="selectCategory(chip.id)"
-          >
-            <span class="chip-icon-box" :class="chip.colorClass">
-              <IconBase :name="chip.icon" :size="13" />
-            </span>
-            <span class="lbl font-bold">{{ chip.label }}</span>
-            <span class="count">{{ getCategoryCount(chip.id) }}</span>
-          </button>
-        </section>
-
         <!-- Segmented View Toggle Control & List Header -->
-        <div class="results-header-row">
+        <div class="results-header-row" style="margin-top: 18px; margin-bottom: 12px;">
           <h3 class="results-title">Nearby Resources <span class="count">({{ filteredResources.length }})</span></h3>
           
-          <div class="segmented-control">
-            <button :class="{ active: viewMode === 'map' }" @click="viewMode = 'map'">
-              <IconBase name="map" :size="13" /> Map
+          <!-- Category Dropdown Button -->
+          <div class="category-dropdown-wrapper">
+            <button class="filter-dropdown-btn" @click.stop="isCategoryDropdownOpen = !isCategoryDropdownOpen">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter-icon"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              <span class="font-bold">{{ activeCategoryLabel }}</span>
+              <span class="count-badge">{{ getCategoryCount(activeCategoryFilter) }}</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
-            <button :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
-              <IconBase name="users" :size="13" /> List
-            </button>
+            
+            <transition name="dropdown-fade">
+              <div class="filter-dropdown-menu" v-if="isCategoryDropdownOpen">
+                <button 
+                  v-for="chip in chips"
+                  :key="chip.id"
+                  class="dropdown-item category-dropdown-item"
+                  :class="{ active: activeCategoryFilter === chip.id }"
+                  @click="selectCategory(chip.id); isCategoryDropdownOpen = false"
+                >
+                  <span class="chip-icon-box mini" :class="chip.colorClass">
+                    <img v-if="chip.imgSrc" :src="chip.imgSrc" style="width: 16px; height: 16px; object-fit: contain;" />
+                    <IconBase v-else :name="chip.icon" :size="11" />
+                  </span>
+                  <span class="lbl-text">{{ chip.label }}</span>
+                  <span class="count-val">{{ getCategoryCount(chip.id) }}</span>
+                </button>
+              </div>
+            </transition>
           </div>
         </div>
 
         <!-- Collapsible Interactive Map Pane -->
         <Transition name="slide-up">
           <section v-if="viewMode === 'map'" class="map-section card">
-            <div class="map-canvas-container" style="position: relative;">
+            <div class="map-canvas-container" style="position: relative; height: auto;">
               <!-- Leaflet Map Container -->
-              <div id="leaflet-resources-map" style="width: 100%; height: 380px; border-radius: 8px; z-index: 1;"></div>
+              <div id="leaflet-resources-map" style="width: 100%; height: 500px; border-radius: 8px; z-index: 1;"></div>
             </div>
 
             <!-- Map Categories Legends Row -->
@@ -798,7 +860,8 @@ onUnmounted(() => {
             <!-- Category Icon bubble -->
             <div class="item-icon-col">
               <span class="category-icon-bubble" :class="getCategoryColor(res.category)">
-                <IconBase 
+                <img v-if="getCategoryImgSrc(res.category)" :src="getCategoryImgSrc(res.category)" style="width: 18px; height: 18px; object-fit: contain;" />
+                <IconBase v-else
                   :name="getCategoryIcon(res.category)" 
                   :size="15" 
                 />
@@ -871,7 +934,8 @@ onUnmounted(() => {
           <section class="detail-main-header">
             <div class="header-banner-row">
               <span class="detail-icon-bubble" :class="getCategoryColor(selectedResource.category)">
-                <IconBase 
+                <img v-if="getCategoryImgSrc(selectedResource.category)" :src="getCategoryImgSrc(selectedResource.category)" style="width: 24px; height: 24px; object-fit: contain;" />
+                <IconBase v-else
                   :name="getCategoryIcon(selectedResource.category)" 
                   :size="20" 
                 />
@@ -1122,7 +1186,7 @@ onUnmounted(() => {
 
 .filter-item.location-col { flex: 1.2; min-width: 140px; }
 .filter-item.search-col { flex: 2; min-width: 180px; }
-.filter-item.radius-col { flex: 0.8; min-width: 90px; }
+.filter-item.radius-col { flex: 0 0 160px; }
 .filter-item.category-col { flex: 1.2; min-width: 130px; }
 
 .filter-item .lbl {
@@ -1142,6 +1206,104 @@ onUnmounted(() => {
   background: #ffffff;
   outline: none;
   cursor: pointer;
+}
+
+/* Custom Radius Dropdown UI */
+.custom-radius-trigger {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.custom-radius-trigger:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.selected-val {
+  font-size: 0.76rem;
+  color: var(--text-primary);
+}
+
+.chevron-icon {
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+}
+
+.chevron-icon.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99;
+}
+
+.custom-radius-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radius-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+
+.radius-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.radius-menu-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.radius-menu-item .active-check {
+  color: #2563eb;
+  font-weight: bold;
+}
+
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .search-input-wrapper {
@@ -1181,42 +1343,117 @@ onUnmounted(() => {
   align-self: flex-end;
 }
 
-/* Category Chips Row */
-.category-chips-row {
+/* Category Dropdown Filter Section */
+.category-filter-section {
+  margin-bottom: 14px;
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  align-items: center;
 }
 
-.chip-item {
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 6px 12px;
+.category-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.filter-dropdown-btn {
   display: flex;
   align-items: center;
   gap: 8px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
 }
 
-.chip-item:hover {
+.filter-dropdown-btn:hover {
+  border-color: #94a3b8;
   background: #f8fafc;
-  transform: translateY(-1px);
 }
 
-.chip-item.active {
-  border-color: #cbd5e1;
-  box-shadow: var(--shadow-sm);
+.filter-icon,
+.chevron-icon {
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.chip-item.active.orange { border-color: #f59e0b; background: #fffbeb; }
-.chip-item.active.green { border-color: #10b981; background: #ecfdf5; }
-.chip-item.active.purple { border-color: #8b5cf6; background: #f5f3ff; }
-.chip-item.active.blue { border-color: #3b82f6; background: #eff6ff; }
-.chip-item.active.pink { border-color: #ec4899; background: #fdf2f8; }
-.chip-item.active.rose { border-color: #f43f5e; background: #fff1f2; }
+.count-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  font-weight: 750;
+  margin-left: 2px;
+}
+
+.filter-dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  z-index: 50;
+  min-width: 220px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.filter-dropdown-menu.left-align {
+  left: 0;
+  right: auto;
+}
+
+.dropdown-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: #475569;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.dropdown-item.active {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.category-dropdown-item .lbl-text {
+  flex-grow: 1;
+}
+
+.category-dropdown-item .count-val {
+  font-size: 0.68rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.category-dropdown-item.active .count-val {
+  color: #2563eb;
+}
 
 .chip-icon-box {
   width: 22px;
@@ -1228,6 +1465,12 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.chip-icon-box.mini {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
 .chip-icon-box.orange { background: #fff9db; color: #f59e0b; }
 .chip-icon-box.green { background: #e6fcf5; color: #10b981; }
 .chip-icon-box.purple { background: #f3f0ff; color: #8b5cf6; }
@@ -1235,19 +1478,6 @@ onUnmounted(() => {
 .chip-icon-box.pink { background: #fdf2f8; color: #ec4899; }
 .chip-icon-box.rose { background: #fff1f2; color: #f43f5e; }
 .chip-icon-box.grey { background: #f1f5f9; color: #64748b; }
-
-.chip-item .lbl {
-  font-size: 0.74rem;
-  color: var(--text-primary);
-}
-
-.chip-item .count {
-  font-size: 0.68rem;
-  color: var(--text-secondary);
-  background: #f1f5f9;
-  padding: 1px 6px;
-  border-radius: 99px;
-}
 
 /* Results header segmented view toggle control */
 .results-header-row {
@@ -1956,5 +2186,58 @@ onUnmounted(() => {
 @keyframes marker-pulse {
   0% { transform: scale(0.5); opacity: 1; }
   100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .resource-detail-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .filters-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filter-item {
+    width: 100%;
+    flex: none;
+  }
+
+  .filter-item.radius-col {
+    flex: none;
+  }
+}
+/* Dropdown Animation */
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

@@ -8,6 +8,17 @@ const activeView = ref('domain')
 
 // Selected community
 const selectedId = ref('cuyahoga')
+const isLocationDropdownOpen = ref(false)
+const countyOptionsList = [
+  { id: 'cuyahoga', name: 'Cuyahoga County, OH' },
+  { id: 'wayne', name: 'Wayne County, MI' },
+  { id: 'marion', name: 'Marion County, IN' },
+  { id: 'franklin', name: 'Franklin County, OH' }
+]
+const selectLocationCounty = (id) => {
+  selectedId.value = id
+  isLocationDropdownOpen.value = false
+}
 
 // Shared metadata for all communities
 const communities = {
@@ -665,14 +676,34 @@ const activeCommunity = computed(() => communities[selectedId.value])
         <h3 class="rail-title">Community Snapshot</h3>
 
         <!-- Interactive Location Selector Pin dropdown -->
-        <div class="location-select-box">
-          <span class="select-pin-icon"><IconBase name="pin" :size="16" /></span>
-          <select v-model="selectedId" class="select-custom">
-            <option value="cuyahoga">Cuyahoga County, OH</option>
-            <option value="wayne">Wayne County, MI</option>
-            <option value="marion">Marion County, IN</option>
-            <option value="franklin">Franklin County, OH</option>
-          </select>
+        <div class="location-select-box custom-dropdown-box">
+          <div class="custom-select-trigger" @click="isLocationDropdownOpen = !isLocationDropdownOpen">
+            <span class="select-pin-icon"><IconBase name="pin" :size="16" /></span>
+            <span class="selected-county-name font-bold">{{ communities[selectedId]?.name || 'Cuyahoga County, OH' }}</span>
+            <span class="chevron-icon" :class="{ open: isLocationDropdownOpen }">
+              <IconBase name="chevron-down" :size="12" />
+            </span>
+          </div>
+
+          <!-- Click outside backdrop overlay -->
+          <div v-if="isLocationDropdownOpen" class="dropdown-backdrop" @click="isLocationDropdownOpen = false"></div>
+
+          <!-- Floating Custom Menu List -->
+          <transition name="menu-fade">
+            <ul v-if="isLocationDropdownOpen" class="custom-location-menu">
+              <li 
+                v-for="opt in countyOptionsList" 
+                :key="opt.id" 
+                class="location-menu-item"
+                :class="{ active: selectedId === opt.id }"
+                @click="selectLocationCounty(opt.id)"
+              >
+                <span class="item-pin">📍</span>
+                <span class="item-label font-semibold">{{ opt.name }}</span>
+                <span v-if="selectedId === opt.id" class="active-check">✓</span>
+              </li>
+            </ul>
+          </transition>
         </div>
 
         <!-- Metric Snapshot stats grid -->
@@ -811,10 +842,12 @@ const activeCommunity = computed(() => communities[selectedId.value])
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: var(--radius-lg);
-  padding: 10px 18px;
+  padding: 12px 18px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .banner-left {
@@ -847,8 +880,15 @@ const activeCommunity = computed(() => communities[selectedId.value])
 }
 
 .sources-chips {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 8px 24px;
+}
+
+@media (max-width: 1280px) {
+  .sources-chips {
+    grid-template-columns: repeat(2, auto);
+  }
 }
 
 .source-chip {
@@ -858,6 +898,7 @@ const activeCommunity = computed(() => communities[selectedId.value])
   display: flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .chip-dot {
@@ -1374,29 +1415,114 @@ const activeCommunity = computed(() => communities[selectedId.value])
   color: var(--text-primary);
 }
 
-.location-select-box {
+/* Custom Modern Dropdown Menu UI */
+.custom-dropdown-box {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 8px 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.custom-dropdown-box:hover {
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-sm);
+}
+
+.custom-select-trigger {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #fdfdfd;
+  cursor: pointer;
+  width: 100%;
+}
+
+.selected-county-name {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.chevron-icon {
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+}
+
+.chevron-icon.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99;
+}
+
+.custom-location-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  margin: 0;
+  list-style: none;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.location-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+
+.location-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.location-menu-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.location-menu-item .active-check {
+  margin-left: auto;
+  font-weight: bold;
+  color: #2563eb;
+}
+
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 .select-pin-icon {
   color: var(--brand);
-}
-
-.select-custom {
-  border: none;
-  background: transparent;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  flex: 1;
-  outline: none;
-  cursor: pointer;
 }
 
 /* Metric summary card */
@@ -1610,5 +1736,76 @@ const activeCommunity = computed(() => communities[selectedId.value])
 
 .view-risk-link:hover {
   text-decoration: underline;
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .snapshot-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    padding: 20px;
+    flex-shrink: 0;
+  }
+  
+  .domains-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .factors-columns-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 1280px) {
+  .bottom-widgets-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .domains-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .bottom-widgets-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 580px) {
+  .domains-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .factors-columns-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .sources-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .sources-chips {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 </style>

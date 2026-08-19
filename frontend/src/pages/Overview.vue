@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
+import FloatingChatbot from '../components/dashboard/FloatingChatbot.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
@@ -8,6 +9,16 @@ import { SYSTEM_BACKEND_URL } from '../config'
 
 const mapLayers = ['Health Risk', 'Social Vulnerability', 'Food Access', 'Environmental Risk', 'Healthcare Access']
 const activeLayer = ref('Health Risk')
+const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
+
+const showFiltersDropdown = ref(false)
+const toggleFiltersDropdown = () => {
+  showFiltersDropdown.value = !showFiltersDropdown.value
+}
+const selectLayer = (layer) => {
+  activeLayer.value = layer
+  showFiltersDropdown.value = false
+}
 
 const communities = {
   cuyahoga: {
@@ -360,6 +371,9 @@ watch(selectedId, (newId) => {
       const poly = polygonLayers[newId]
       if (poly) poly.openPopup()
     }
+    nextTick(() => {
+      map.invalidateSize()
+    })
   }
 })
 
@@ -495,7 +509,7 @@ const handleSendMessage = () => {
             community factors to identify health risks and close health-equity gaps.
           </p>
           <div class="hero-actions">
-            <button class="btn primary" @click="handleConsultClick" style="text-decoration: none; cursor: pointer;">
+            <button class="btn primary btn-consult-ai" @click="handleConsultClick" style="text-decoration: none; cursor: pointer;">
               <IconBase name="sparkle" :size="16" /> Consult AI
             </button>
             <router-link to="/equity-map" class="btn ghost" style="text-decoration: none;">
@@ -512,11 +526,13 @@ const handleSendMessage = () => {
       <!-- Patient Specific Context Banner -->
       <section v-if="isAnalyzed" class="card active-patient-banner" style="background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); color: white; border: none; display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; box-shadow: 0 10px 25px rgba(59, 130, 246, 0.25); border-radius: 16px; margin-bottom: 24px;">
         <div style="display: flex; align-items: center; gap: 16px;">
-          <div style="background: rgba(255,255,255,0.2); width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🔬</div>
+          <div style="background: #ffffff; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; padding: 4px; flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <img :src="microscopeSrc" alt="AI Analysis" style="width: 34px; height: 34px; object-fit: contain;" />
+          </div>
           <div>
             <h3 style="margin: 0; color: white; font-size: 1.1rem; font-weight: 700;">Active Patient: {{ patientData.name }} (Age {{ patientData.age }})</h3>
             <p style="margin: 4px 0 0; font-size: 0.85rem; opacity: 0.9; color: rgba(255,255,255,0.9);">
-              Individual Risk Prediction & social determinants generated via FastAPI machine learning service.
+              Individual Risk Prediction & social determinants generated via CareEquity Predictive System.
             </p>
           </div>
         </div>
@@ -526,24 +542,35 @@ const handleSendMessage = () => {
       <div class="map-section-wrapper">
         <div class="map-row">
           <article class="card map-card">
+            <!-- Dropdown click-outside overlay -->
+            <div v-if="showFiltersDropdown" class="dropdown-overlay" @click="showFiltersDropdown = false"></div>
+
             <div class="map-head">
               <div>
                 <h3 class="font-bold">Health Equity Map</h3>
                 <p>Explore social determinants and health risks by community</p>
               </div>
-              <button class="btn outline sm"><IconBase name="filter" :size="14" /> Filters</button>
-            </div>
-
-            <div class="map-tabs">
-              <button
-                v-for="layer in mapLayers"
-                :key="layer"
-                class="map-tab"
-                :class="{ active: layer === activeLayer }"
-                @click="activeLayer = layer"
-              >
-                {{ layer }}
-              </button>
+              <div class="filter-dropdown-container" style="position: relative; display: inline-block;">
+                <button class="btn outline sm filter-trigger" @click="toggleFiltersDropdown" :class="{ 'btn-active': showFiltersDropdown }">
+                  <IconBase name="filter" :size="14" /> Filters
+                </button>
+                
+                <Transition name="fade">
+                  <div v-if="showFiltersDropdown" class="filter-dropdown-menu">
+                    <div class="dropdown-header">Select Map Layer</div>
+                    <button
+                      v-for="layer in mapLayers"
+                      :key="layer"
+                      class="dropdown-item"
+                      :class="{ active: layer === activeLayer }"
+                      @click="selectLayer(layer)"
+                    >
+                      <span class="status-indicator" :class="{ active: layer === activeLayer }"></span>
+                      {{ layer }}
+                    </button>
+                  </div>
+                </Transition>
+              </div>
             </div>
 
             <div class="map-canvas">
@@ -566,7 +593,6 @@ const handleSendMessage = () => {
                 <h4 class="font-bold" style="margin: 0;">{{ selectedCommunity.name }}</h4>
                 <p v-if="selectedCommunity.state" style="margin: 2px 0 0; font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">{{ selectedCommunity.state }}</p>
               </div>
-              <button class="btn-heart"><IconBase name="heart" :size="17" /></button>
             </div>
             <p class="community-sub">Health Equity Score</p>
 
@@ -729,7 +755,7 @@ const handleSendMessage = () => {
               </svg>
             </div>
             <h2>Consult AI</h2>
-            <p>SDoH, SVI & Intervention Assistant</p>
+            <p>SDOH, SVI & Intervention Assistant</p>
 
             <div class="ai-mode-cards">
               <div class="mode-card" :class="{ active: activeMode === 'vibe' }" @click="activeMode = 'vibe'">
@@ -737,7 +763,7 @@ const handleSendMessage = () => {
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block; vertical-align:middle;">
                     <circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>
                   </svg>
-                  Analyze SDoH
+                  Analyze SDOH
                 </h4>
                 <p>Explore social vulnerability and barriers.</p>
               </div>
@@ -813,6 +839,7 @@ const handleSendMessage = () => {
         </div>
       </div>
     </aside>
+    <FloatingChatbot />
   </div>
 </template>
 
@@ -970,7 +997,6 @@ const handleSendMessage = () => {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr);
   gap: 24px;
-  align-items: start;
 }
 
 .map-head {
@@ -1023,12 +1049,18 @@ const handleSendMessage = () => {
   border-color: var(--brand);
 }
 
+.map-card {
+  display: flex;
+  flex-direction: column;
+}
+
 .map-canvas {
   position: relative;
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border);
-  height: 360px;
+  flex: 1;
+  min-height: 360px;
   background: #f8fafc;
 }
 
@@ -1286,11 +1318,19 @@ const handleSendMessage = () => {
 }
 
 /* Right Rail Action Card */
-.action-card h4,
-.compare-card h4 {
+.action-card h4 {
   margin: 0 0 16px;
   font-size: 0.95rem;
   font-weight: 700;
+}
+
+.compare-card h4 {
+  margin: 0 0 16px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .score-big {
@@ -1422,9 +1462,32 @@ const handleSendMessage = () => {
   float: left;
 }
 
-@media (max-width: 1200px) {
-  .main-layout-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 1100px) {
+  .overview-layout {
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .overview-main-content {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .overview-right-sidebar {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .right-sidebar-scroll-container {
+    height: auto;
+    overflow: visible;
+    padding: 20px;
   }
 }
 
@@ -1792,5 +1855,109 @@ input:checked + .slider:before {
   border-color: var(--brand);
   color: var(--brand-dark);
   transform: translateY(-1px);
+}
+
+/* ── FILTERS DROPDOWN ── */
+.dropdown-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1090;
+  background: transparent;
+}
+
+.filter-dropdown-container {
+  z-index: 1100;
+}
+
+.filter-trigger {
+  transition: all 0.15s ease;
+}
+
+.filter-trigger.btn-active {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand-dark);
+}
+
+.filter-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+  padding: 8px;
+  min-width: 200px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropdown-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 10px 4px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+}
+
+.dropdown-item.active {
+  background: rgba(79, 70, 229, 0.05);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.status-indicator.active {
+  background: var(--brand);
+}
+
+/* ── BUTTON SPARKLE SPIN ON HOVER ── */
+.btn-consult-ai:hover :deep(.icon) {
+  animation: spin-slow 8s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

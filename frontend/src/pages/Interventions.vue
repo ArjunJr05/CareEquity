@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
 import IconBase from '../components/dashboard/IconBase.vue'
 import { isAnalyzed, patientData, mlPredictionResults } from '../store/appState'
 
@@ -12,6 +13,42 @@ const selectedDomain = ref('All')
 const selectedPopulation = ref('All')
 const selectedType = ref('All')
 const selectedStatus = ref('All')
+
+// Custom Dropdowns Open States
+const isPriorityOpen = ref(false)
+const isDomainOpen = ref(false)
+const isPopulationOpen = ref(false)
+const isTypeOpen = ref(false)
+const isStatusOpen = ref(false)
+
+function closeAllDropdowns() {
+  isPriorityOpen.value = false
+  isDomainOpen.value = false
+  isPopulationOpen.value = false
+  isTypeOpen.value = false
+  isStatusOpen.value = false
+}
+
+function handleGlobalClick(e) {
+  if (!e.target.closest('.custom-filter-dropdown')) {
+    closeAllDropdowns()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('click', handleGlobalClick)
+})
+
+function getDomainLabel(val) {
+  switch (val) {
+    case 'Food': return 'Food Access'
+    case 'Transit': return 'Transportation'
+    case 'Housing': return 'Housing Stability'
+    case 'Environment': return 'Environmental Health'
+    case 'Mental': return 'Mental Health'
+    default: return 'All Domains'
+  }
+}
 
 // Modal States
 const showCreateModal = ref(false)
@@ -373,7 +410,7 @@ const activeCountyData = computed(() => {
         expectedImpact: '↓ 15.0% Patient Risk',
         priority: 'High',
         status: 'Planned',
-        whyIntervention: `Identified SDoH barrier: "${barrier}". Resolving this barrier is key to improving health outcomes for ${patientData.value.name}.`,
+        whyIntervention: `Identified SDOH barrier: "${barrier}". Resolving this barrier is key to improving health outcomes for ${patientData.value.name}.`,
         keyDrivers: [
           { name: barrier, val: 85, color: 'red' }
         ],
@@ -397,7 +434,7 @@ const activeCountyData = computed(() => {
       highPriority: list.length,
       impactedPop: '1 Patient',
       expectedReached: '1 Patient',
-      potentialImpact: 'SDoH Barrier Mitigation',
+      potentialImpact: 'SDOH Barrier Mitigation',
       impactMembersReached: '1',
       impactRiskReduction: 'High',
       impactVisitsAvoided: '1',
@@ -632,7 +669,10 @@ function getDomainColor(domain) {
       <div class="content-body">
         
         <!-- Header -->
-        <header class="page-header">
+        <header class="page-header header-with-icon">
+          <span class="header-icon-bubble purple">
+            <IconBase name="shield" :size="18" />
+          </span>
           <div>
             <h1>Interventions</h1>
             <p class="description">AI-powered recommendations to reduce risk and improve health equity.</p>
@@ -640,14 +680,26 @@ function getDomainColor(domain) {
         </header>
 
         <!-- Patient Specific Context Banner -->
-        <section v-if="isAnalyzed" class="card active-patient-banner" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2); border-radius: 12px; margin-bottom: 8px; flex-shrink: 0;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: rgba(255,255,255,0.2); width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;">🔬</div>
+        <section v-if="isAnalyzed" class="card active-patient-banner" style="background: linear-gradient(135deg, #3f51b5 0%, #1a237e 100%); color: white; border: none; display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; box-shadow: 0 4px 15px rgba(26, 35, 126, 0.25); border-radius: 12px; margin-bottom: 18px; flex-shrink: 0; position: relative; overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 12px; position: relative; z-index: 2;">
+            <div style="background: #ffffff; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 3px; flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+              <img src="/assets/organic.gif" alt="AI Analysis" style="width: 34px; height: 34px; object-fit: contain;" />
+            </div>
             <div>
-              <h3 style="margin: 0; color: white; font-size: 0.95rem; font-weight: 700;">Viewing Interventions for: {{ patientData.name }}</h3>
-              <p style="margin: 2px 0 0; font-size: 0.78rem; opacity: 0.9; color: rgba(255,255,255,0.95);">
-                Clinical pathways generated from patient SDoH barriers using Neo4j knowledge graph pathways.
+              <h3 style="margin: 0; color: white; font-size: 0.95rem; font-weight: 700;">Viewing Interventions for: {{ patientData.name }} (Age {{ patientData.age || 1 }})</h3>
+              <p style="margin: 2px 0 0; font-size: 0.76rem; opacity: 0.9; color: rgba(255,255,255,0.95);">
+                Clinical pathways generated from patient SDOH barriers using Neo4j knowledge graph pathways.
               </p>
+            </div>
+          </div>
+
+          <!-- Concentric glowing circle illustration -->
+          <div class="banner-right-illustration">
+            <div class="glow-ring ring-1"></div>
+            <div class="glow-ring ring-2"></div>
+            <div class="glow-ring ring-3"></div>
+            <div class="illustration-core">
+              <IconBase name="heart" :size="20" />
             </div>
           </div>
         </section>
@@ -655,7 +707,7 @@ function getDomainColor(domain) {
         <!-- Top Stat Cards Row -->
         <section class="stat-cards-grid">
           
-          <div class="stat-card card">
+          <div class="stat-card card green-card">
             <div class="header-row">
               <span class="bubble green"><IconBase name="plus" :size="14" /></span>
               <span class="title">Interventions Recommended</span>
@@ -664,14 +716,9 @@ function getDomainColor(domain) {
               <h2>{{ activeCountyData.recommended }}</h2>
               <span class="trend green">&uarr; 16.7% <span class="trend-lbl">vs last 30d</span></span>
             </div>
-            <div class="sparkline-wrapper">
-              <svg viewBox="0 0 100 24" class="sparkline-svg green">
-                <path d="M0,18 Q15,10 30,14 T60,8 T90,12" fill="none" stroke="#10b981" stroke-width="2" />
-              </svg>
-            </div>
           </div>
 
-          <div class="stat-card card">
+          <div class="stat-card card purple-card">
             <div class="header-row">
               <span class="bubble purple"><IconBase name="shield" :size="14" /></span>
               <span class="title">High Priority Interventions</span>
@@ -680,16 +727,9 @@ function getDomainColor(domain) {
               <h2>{{ activeCountyData.highPriority }}</h2>
               <span class="trend purple">&uarr; 23.1% <span class="trend-lbl">vs last 30d</span></span>
             </div>
-            <div class="sparkline-wrapper">
-              <svg viewBox="0 0 100 24" class="sparkline-svg purple">
-                <path d="M0,15 Q15,19 30,10 T60,16 T90,5" fill="none" stroke="#8b5cf6" stroke-width="2" />
-              </svg>
-            </div>
           </div>
 
-          
-
-          <div class="stat-card card">
+          <div class="stat-card card orange-card">
             <div class="header-row">
               <span class="bubble orange"><IconBase name="trend" :size="14" /></span>
               <span class="title">Expected Members Reached</span>
@@ -698,26 +738,16 @@ function getDomainColor(domain) {
               <h2>{{ activeCountyData.expectedReached }}</h2>
               <span class="trend orange">&uarr; 18.6% <span class="trend-lbl">vs last 30d</span></span>
             </div>
-            <div class="sparkline-wrapper">
-              <svg viewBox="0 0 100 24" class="sparkline-svg orange">
-                <path d="M0,17 Q15,13 30,16 T60,9 T90,7" fill="none" stroke="#f59e0b" stroke-width="2" />
-              </svg>
-            </div>
           </div>
 
-          <div class="stat-card card">
+          <div class="stat-card card red-card">
             <div class="header-row">
               <span class="bubble rose"><IconBase name="pulse" :size="14" /></span>
               <span class="title">Potential Impact (Risk Reduction)</span>
             </div>
             <div class="value-row">
-              <h2>{{ activeCountyData.potentialImpact }}</h2>
+              <h2 style="font-size: 1.1rem; line-height: 1.2; max-width: 140px;">{{ activeCountyData.potentialImpact }}</h2>
               <span class="trend rose">&uarr; 3.2 pts <span class="trend-lbl">vs last 30d</span></span>
-            </div>
-            <div class="sparkline-wrapper">
-              <svg viewBox="0 0 100 24" class="sparkline-svg rose">
-                <path d="M0,14 Q15,16 30,11 T60,15 T90,4" fill="none" stroke="#f43f5e" stroke-width="2" />
-              </svg>
             </div>
           </div>
 
@@ -730,61 +760,162 @@ function getDomainColor(domain) {
               <h3>Recommended Interventions</h3>
               <p class="subtitle">AI-generated recommendations based on community needs and risk factors.</p>
             </div>
-            <button class="filters-btn" @click="triggerToast('Advanced filter toggled')">
-              <IconBase name="filter" :size="14" /> Filters
-            </button>
+
           </div>
 
           <!-- Dropdowns Filter row -->
           <div class="filters-row">
-            <div class="filter-select-col">
+            
+            <!-- Priority Filter -->
+            <div class="filter-select-col custom-filter-dropdown">
               <span class="lbl font-bold">Priority</span>
-              <select v-model="selectedPriority">
-                <option>All</option>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
-              </select>
+              <div class="custom-dropdown-wrapper">
+                <button 
+                  class="custom-dropdown-trigger" 
+                  :class="{ active: isPriorityOpen }"
+                  @click.stop="closeAllDropdowns(); isPriorityOpen = !isPriorityOpen"
+                >
+                  <span>{{ selectedPriority === 'All' ? 'All Priorities' : selectedPriority }}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" :class="{ open: isPriorityOpen }"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <transition name="dropdown-fade">
+                  <div class="custom-dropdown-menu" v-if="isPriorityOpen">
+                    <button 
+                      v-for="opt in ['All', 'High', 'Medium', 'Low']"
+                      :key="opt"
+                      class="dropdown-menu-item"
+                      :class="{ selected: selectedPriority === opt }"
+                      @click="selectedPriority = opt; isPriorityOpen = false"
+                    >
+                      {{ opt === 'All' ? 'All Priorities' : opt }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
-            <div class="filter-select-col">
+            <!-- SDOH Domain Filter -->
+            <div class="filter-select-col custom-filter-dropdown">
               <span class="lbl font-bold">SDOH Domain</span>
-              <select v-model="selectedDomain">
-                <option value="All">All Domains</option>
-                <option value="Food">Food Access</option>
-                <option value="Transit">Transportation</option>
-                <option value="Housing">Housing Stability</option>
-                <option value="Environment">Environmental Health</option>
-                <option value="Mental">Mental Health</option>
-              </select>
+              <div class="custom-dropdown-wrapper">
+                <button 
+                  class="custom-dropdown-trigger" 
+                  :class="{ active: isDomainOpen }"
+                  @click.stop="closeAllDropdowns(); isDomainOpen = !isDomainOpen"
+                >
+                  <span>{{ getDomainLabel(selectedDomain) }}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" :class="{ open: isDomainOpen }"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <transition name="dropdown-fade">
+                  <div class="custom-dropdown-menu" v-if="isDomainOpen">
+                    <button 
+                      v-for="opt in [
+                        { val: 'All', label: 'All Domains' },
+                        { val: 'Food', label: 'Food Access' },
+                        { val: 'Transit', label: 'Transportation' },
+                        { val: 'Housing', label: 'Housing Stability' },
+                        { val: 'Environment', label: 'Environmental Health' },
+                        { val: 'Mental', label: 'Mental Health' }
+                      ]"
+                      :key="opt.val"
+                      class="dropdown-menu-item"
+                      :class="{ selected: selectedDomain === opt.val }"
+                      @click="selectedDomain = opt.val; isDomainOpen = false"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
-            <div class="filter-select-col">
+            <!-- Population Filter -->
+            <div class="filter-select-col custom-filter-dropdown">
               <span class="lbl font-bold">Population</span>
-              <select v-model="selectedPopulation">
-                <option value="All">All Populations</option>
-                <option>Low-income Adults</option>
-                <option>Seniors</option>
-              </select>
+              <div class="custom-dropdown-wrapper">
+                <button 
+                  class="custom-dropdown-trigger" 
+                  :class="{ active: isPopulationOpen }"
+                  @click.stop="closeAllDropdowns(); isPopulationOpen = !isPopulationOpen"
+                >
+                  <span>{{ selectedPopulation === 'All' ? 'All Populations' : selectedPopulation }}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" :class="{ open: isPopulationOpen }"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <transition name="dropdown-fade">
+                  <div class="custom-dropdown-menu" v-if="isPopulationOpen">
+                    <button 
+                      v-for="opt in ['All', 'Low-income Adults', 'Seniors']"
+                      :key="opt"
+                      class="dropdown-menu-item"
+                      :class="{ selected: selectedPopulation === opt }"
+                      @click="selectedPopulation = opt; isPopulationOpen = false"
+                    >
+                      {{ opt === 'All' ? 'All Populations' : opt }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
-            <div class="filter-select-col">
+            <!-- Intervention Type Filter -->
+            <div class="filter-select-col custom-filter-dropdown">
               <span class="lbl font-bold">Intervention Type</span>
-              <select v-model="selectedType">
-                <option value="All">All Types</option>
-                <option>Clinical Outreach</option>
-                <option>Socioeconomic Support</option>
-              </select>
+              <div class="custom-dropdown-wrapper">
+                <button 
+                  class="custom-dropdown-trigger" 
+                  :class="{ active: isTypeOpen }"
+                  @click.stop="closeAllDropdowns(); isTypeOpen = !isTypeOpen"
+                >
+                  <span>{{ selectedType === 'All' ? 'All Types' : selectedType }}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" :class="{ open: isTypeOpen }"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <transition name="dropdown-fade">
+                  <div class="custom-dropdown-menu" v-if="isTypeOpen">
+                    <button 
+                      v-for="opt in ['All', 'Clinical Outreach', 'Socioeconomic Support']"
+                      :key="opt"
+                      class="dropdown-menu-item"
+                      :class="{ selected: selectedType === opt }"
+                      @click="selectedType = opt; isTypeOpen = false"
+                    >
+                      {{ opt === 'All' ? 'All Types' : opt }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
-            <div class="filter-select-col">
+            <!-- Status Filter -->
+            <div class="filter-select-col custom-filter-dropdown">
               <span class="lbl font-bold">Status</span>
-              <select v-model="selectedStatus">
-                <option>All</option>
-                <option>Active</option>
-                <option>Planned</option>
-                <option>Draft</option>
-              </select>
+              <div class="custom-dropdown-wrapper">
+                <button 
+                  class="custom-dropdown-trigger" 
+                  :class="{ active: isStatusOpen }"
+                  @click.stop="closeAllDropdowns(); isStatusOpen = !isStatusOpen"
+                >
+                  <span>{{ selectedStatus === 'All' ? 'All Statuses' : selectedStatus }}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" :class="{ open: isStatusOpen }"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <transition name="dropdown-fade">
+                  <div class="custom-dropdown-menu" v-if="isStatusOpen">
+                    <button 
+                      v-for="opt in ['All', 'Active', 'Planned', 'Draft']"
+                      :key="opt"
+                      class="dropdown-menu-item"
+                      :class="{ selected: selectedStatus === opt }"
+                      @click="selectedStatus = opt; isStatusOpen = false"
+                    >
+                      {{ opt === 'All' ? 'All Statuses' : opt }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
             <button class="reset-btn" @click="resetFilters">
@@ -1209,6 +1340,18 @@ function getDomainColor(domain) {
   font-size: 1.6rem;
   font-weight: 800;
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-header h1::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 22px;
+  background: #8b5cf6;
+  border-radius: 2px;
 }
 
 .page-header .description {
@@ -1262,6 +1405,74 @@ function getDomainColor(domain) {
   padding: 16px;
 }
 
+/* Header with Icon */
+.page-header.header-with-icon {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.header-icon-bubble {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.header-icon-bubble.purple {
+  background: #f5f3ff;
+  color: #8b5cf6;
+}
+
+/* Banner Right Illustration */
+.banner-right-illustration {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.glow-ring {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ring-1 {
+  width: 80px;
+  height: 80px;
+}
+
+.ring-2 {
+  width: 60px;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ring-3 {
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.illustration-core {
+  position: relative;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
 /* Stat Cards Row */
 .stat-cards-grid {
   display: grid;
@@ -1276,6 +1487,21 @@ function getDomainColor(domain) {
   gap: 8px;
   position: relative;
   overflow: hidden;
+  background: #ffffff;
+}
+
+/* Card Borders */
+.stat-card.green-card {
+  border-left: 3px solid #10b981;
+}
+.stat-card.purple-card {
+  border-right: 3px solid #8b5cf6;
+}
+.stat-card.orange-card {
+  border-right: 3px solid #f97316;
+}
+.stat-card.red-card {
+  border-right: 3px solid #ef4444;
 }
 
 .stat-card .header-row {
@@ -1415,16 +1641,87 @@ function getDomainColor(domain) {
   text-transform: uppercase;
 }
 
-.filter-select-col select {
+.custom-dropdown-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.custom-dropdown-trigger {
+  width: 100%;
   border: 1px solid var(--border);
   background: #ffffff;
+  border-radius: 6px;
+  padding: 5px 8px;
   font-size: 0.74rem;
   font-weight: 600;
-  padding: 4px 6px;
-  border-radius: 6px;
-  outline: none;
-  cursor: pointer;
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.custom-dropdown-trigger:hover,
+.custom-dropdown-trigger.active {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.custom-dropdown-trigger .chevron-icon {
+  color: #64748b;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.custom-dropdown-trigger .chevron-icon.open {
+  transform: rotate(180deg);
+  color: var(--brand);
+}
+
+.custom-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  min-width: 130px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-menu-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.dropdown-menu-item:hover {
+  background: #f1f5f9;
+  color: var(--text-primary);
+}
+
+.dropdown-menu-item.selected {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 700;
 }
 
 .reset-btn {
@@ -1497,12 +1794,17 @@ function getDomainColor(domain) {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .item-title {
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-primary);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .priority-badge-small {
@@ -1510,6 +1812,7 @@ function getDomainColor(domain) {
   padding: 1px 5px;
   border-radius: 4px;
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .priority-badge-small.high { background: #fee2e2; color: #b91c1c; }
@@ -2010,5 +2313,95 @@ function getDomainColor(domain) {
   font-size: 0.74rem;
   line-height: 1.4;
   margin: 0;
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 1100px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .content-body {
+    height: auto;
+    overflow: visible;
+    padding: 16px 20px;
+    flex-shrink: 0;
+  }
+
+  .intervention-detail-rail {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 1000px) {
+  .intervention-row {
+    grid-template-columns: 36px 1.8fr 1.2fr 80px 24px;
+  }
+  .pop-cell, .impact-cell, .priority-cell {
+    display: none;
+  }
+
+  .impact-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .active-patient-banner {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 16px;
+  }
+  
+  .banner-right-illustration {
+    align-self: flex-end;
+    margin-top: -12px;
+  }
+
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filter-select-col {
+    width: 100%;
+  }
+  
+  .sec-header-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .filters-btn {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .intervention-row {
+    grid-template-columns: 36px 1fr 80px 24px;
+  }
+  .drivers-cell {
+    display: none;
+  }
+
+  .impact-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .impact-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
