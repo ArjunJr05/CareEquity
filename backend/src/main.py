@@ -39,6 +39,7 @@ app.add_middleware(
 
 # Mount API routers
 app.include_router(patients.router, prefix="/api")
+app.include_router(patients.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
@@ -50,3 +51,7 @@ def read_root():
         "service": "CareEquity Backend API",
         "database": "Connected"
     }
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}

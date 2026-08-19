@@ -1,17 +1,17 @@
 services:
 
-  ocr-backend:
+  main-backend:
     build:
-      context: ./backend/ocr
+      context: ./backend
       dockerfile: Dockerfile
-
-    container_name: careequity-ocr-backend
-
+    container_name: careequity-main-backend
     ports:
       - "8000:8000"
-
+    environment:
+      DATABASE_URL: postgresql://postgres:3513@host.docker.internal:5432/careequity
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
-
     healthcheck:
       test:
         [
@@ -25,22 +25,28 @@ services:
       retries: 5
       start_period: 20s
 
+  main-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: careequity-main-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      main-backend:
+        condition: service_healthy
+    restart: unless-stopped
 
-  ocr-ui:
+  ocr-frontend:
     build:
       context: ./ocr-ui
       dockerfile: Dockerfile
-
-    container_name: careequity-ocr-ui
-
+    container_name: careequity-ocr-frontend
     ports:
       - "8501:8501"
-
     environment:
-      BACKEND_URL: http://ocr-backend:8000
-
+      BACKEND_URL: http://main-backend:8000
     depends_on:
-      ocr-backend:
+      main-backend:
         condition: service_healthy
-
     restart: unless-stopped
