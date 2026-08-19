@@ -1,0 +1,46 @@
+services:
+
+  ocr-backend:
+    build:
+      context: ./backend/ocr
+      dockerfile: Dockerfile
+
+    container_name: careequity-ocr-backend
+
+    ports:
+      - "8000:8000"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+
+  ocr-ui:
+    build:
+      context: ./ocr-ui
+      dockerfile: Dockerfile
+
+    container_name: careequity-ocr-ui
+
+    ports:
+      - "8501:8501"
+
+    environment:
+      BACKEND_URL: http://ocr-backend:8000
+
+    depends_on:
+      ocr-backend:
+        condition: service_healthy
+
+    restart: unless-stopped
