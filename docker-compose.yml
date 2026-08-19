@@ -2,7 +2,7 @@ services:
 
   ocr-backend:
     build:
-      context: ./backend/ocr
+      context: ./ocr
       dockerfile: Dockerfile
 
     container_name: careequity-ocr-backend
@@ -28,7 +28,7 @@ services:
 
   ocr-ui:
     build:
-      context: ./ocr-ui
+      context: ./ocr/ocr-ui
       dockerfile: Dockerfile
 
     container_name: careequity-ocr-ui
