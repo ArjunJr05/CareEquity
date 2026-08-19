@@ -2,7 +2,6 @@ services:
 
   main-backend:
     build:
-      context: ./ocr
       context: ./backend
       dockerfile: Dockerfile
     container_name: careequity-main-backend
@@ -38,6 +37,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  ocr-backend:
+    build:
+      context: ./ocr
+      dockerfile: Dockerfile
+    container_name: careequity-ocr-backend
+    ports:
+      - "8001:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   ocr-frontend:
     build:
       context: ./ocr/ocr-ui
@@ -46,8 +68,8 @@ services:
     ports:
       - "8501:8501"
     environment:
-      BACKEND_URL: http://main-backend:8000
+      BACKEND_URL: http://ocr-backend:8000
     depends_on:
-      main-backend:
+      ocr-backend:
         condition: service_healthy
     restart: unless-stopped

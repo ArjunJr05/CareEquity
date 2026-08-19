@@ -11,3 +11,7 @@ export const SYSTEM_BACKEND_URL = isLocal
 export const PREDICTION_BACKEND_URL = isLocal 
   ? 'http://localhost:8002' 
   : 'https://careequity-prediction-model.onrender.com';
+
+export const OCR_BACKEND_URL = isLocal 
+  ? 'http://localhost:8001' 
+  : 'http://localhost:8001';

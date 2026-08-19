@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson } from '../store/appState'
 import { MAIN_BACKEND_URL } from '../config'
 
 // Active configuration state
@@ -812,11 +812,44 @@ function exportCSV() {
               <p class="preview-sub" v-html="activeReportData.completedDate"></p>
             </div>
             
-            <div class="actions">
+            <div class="actions" style="display: flex; gap: 10px; align-items: center;">
               <button class="btn outlined" @click="exportPDF">
                 <IconBase name="report" :size="13" /> Export PDF
               </button>
+            </div>
+          </div>
+
+          <!-- Input JSON Page Section inside Report -->
+          <div style="margin-top: 16px; margin-bottom: 24px; background: #0f172a; border-radius: 12px; border: 1px solid #1e293b; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,0.2);">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: #1e293b; border-bottom: 1px solid #334155;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></span>
+                <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #f8fafc; font-family: monospace; letter-spacing: 0.5px;">
+                  📄 INPUT OCR JSON RECORD
+                </h4>
               </div>
+              <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: rgba(56, 189, 248, 0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(56, 189, 248, 0.2);">
+                {{ ocrExtractedJson ? 'LIVE EXTRACTED DATA' : 'SAMPLE REPORT JSON' }}
+              </span>
+            </div>
+            <pre style="margin: 0; padding: 18px; max-height: 320px; overflow-y: auto; color: #38bdf8; font-size: 0.8rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.5; white-space: pre-wrap; background: #090d16;">{{ JSON.stringify(ocrExtractedJson || {
+  "status": "success",
+  "document_type": "patient_details",
+  "patient_info": {
+    "name": patientData.name || "Jane Smith",
+    "age": patientData.age || 45,
+    "gender": patientData.gender || "Female",
+    "county": "Cuyahoga County",
+    "state": "OH"
+  },
+  "conditions": {
+    "diabetes": patientData.diabetes || "No",
+    "hypertension": patientData.hypertension || "No",
+    "heart_disease": patientData.heart_disease || "No",
+    "asthma": patientData.asthma || "No"
+  },
+  "timestamp": new Date().toISOString()
+}, null, 2) }}</pre>
           </div>
 
           <!-- Top Highlight metrics cards -->
