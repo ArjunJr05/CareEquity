@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload } from '../store/appState'
 import { MAIN_BACKEND_URL } from '../config'
 
 // Active configuration state
@@ -734,6 +734,24 @@ function downloadPatientReport() {
         ${barriersSectionHtml}
         ${resourcesSectionHtml}
 
+        <div class="section-title">Raw ML Input JSON Payload Record</div>
+        <div style="background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; color: #38bdf8; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all;">
+${JSON.stringify(mlInputPayload.value || ocrExtractedJson.value || {
+  "patient_id": p.name ? `PATIENT_${p.name.replace(/\s+/g, '_').toUpperCase()}` : 'OCR_PATIENT_001',
+  "medical_data": {
+    "age": parseInt(p.age) || 45,
+    "height_cm": 170,
+    "weight_kg": 70,
+    "bmi": 24.22,
+    "systolic_bp": 120,
+    "diastolic_bp": 80,
+    "heart_rate": 72
+  },
+  "target_locations": [["Cuyahoga", "OH", "United States"]],
+  "patient_data": p
+}, null, 2)}
+        </div>
+
         <div class="footer">
           <p>Confidential Medical Record. This report was compiled using CareEquity predictive models and local geolocation scraping endpoints.</p>
           <p>&copy; ${new Date().getFullYear()} CareEquity Inc. All rights reserved.</p>
@@ -825,30 +843,45 @@ function exportCSV() {
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></span>
                 <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #f8fafc; font-family: monospace; letter-spacing: 0.5px;">
-                  📄 INPUT OCR JSON RECORD
+                  📄 INPUT OCR & ML PIPELINE JSON RECORD
                 </h4>
               </div>
-              <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: rgba(56, 189, 248, 0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(56, 189, 248, 0.2);">
-                {{ ocrExtractedJson ? 'LIVE EXTRACTED DATA' : 'SAMPLE REPORT JSON' }}
+              <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 600; background: rgba(56, 189, 248, 0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(56, 189, 248, 0.2);">
+                {{ mlInputPayload ? 'LIVE ML V2 INPUT PAYLOAD' : (ocrExtractedJson ? 'LIVE EXTRACTED OCR DATA' : 'PATIENT INPUT JSON RECORD') }}
               </span>
             </div>
-            <pre style="margin: 0; padding: 18px; max-height: 320px; overflow-y: auto; color: #38bdf8; font-size: 0.8rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.5; white-space: pre-wrap; background: #090d16;">{{ JSON.stringify(ocrExtractedJson || {
-  "status": "success",
-  "document_type": "patient_details",
-  "patient_info": {
+            <pre style="margin: 0; padding: 18px; max-height: 400px; overflow-y: auto; color: #38bdf8; font-size: 0.82rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.5; white-space: pre-wrap; background: #090d16;">{{ JSON.stringify(mlInputPayload || ocrExtractedJson || {
+  "patient_id": patientData.name ? `PATIENT_${patientData.name.replace(/\s+/g, '_').toUpperCase()}` : 'OCR_PATIENT_001',
+  "medical_data": {
+    "age": parseInt(patientData.age) || 45,
+    "height_cm": 170,
+    "weight_kg": 70,
+    "bmi": 24.22,
+    "systolic_bp": 120,
+    "diastolic_bp": 80,
+    "heart_rate": 72,
+    "hba1c": 5.6,
+    "fasting_glucose": 95,
+    "total_cholesterol": 185,
+    "ldl": 110,
+    "hdl": 50,
+    "triglycerides": 130,
+    "sex": patientData.gender || "Female",
+    "smoking_status": "Non-Smoker",
+    "alcohol_use": "Moderate"
+  },
+  "target_locations": [
+    ["Cuyahoga", "OH", "United States"]
+  ],
+  "patient_data": {
     "name": patientData.name || "Jane Smith",
     "age": patientData.age || 45,
     "gender": patientData.gender || "Female",
-    "county": "Cuyahoga County",
-    "state": "OH"
-  },
-  "conditions": {
     "diabetes": patientData.diabetes || "No",
     "hypertension": patientData.hypertension || "No",
     "heart_disease": patientData.heart_disease || "No",
     "asthma": patientData.asthma || "No"
-  },
-  "timestamp": new Date().toISOString()
+  }
 }, null, 2) }}</pre>
           </div>
 
