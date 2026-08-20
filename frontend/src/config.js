@@ -11,3 +11,5 @@ export const SYSTEM_BACKEND_URL = isLocal
 export const PREDICTION_BACKEND_URL = isLocal 
   ? 'http://localhost:8002' 
   : 'https://careequity-prediction-model.onrender.com';
+
+export const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TRtTOuWOsWyK15';

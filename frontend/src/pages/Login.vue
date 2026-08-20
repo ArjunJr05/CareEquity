@@ -1,13 +1,27 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { setLoggedIn, setShowLoginScreen, setAdmin } from '../store/appState'
+import { setLoggedIn, setShowLoginScreen, setAdmin, userPlan, setUserPlan } from '../store/appState'
 import { MAIN_BACKEND_URL } from '../config'
 
 const router = useRouter()
 
-// Steps: 'login', 'signup', 'otp'
+// Steps: 'login', 'signup', 'otp', 'plans'
 const currentStep = ref('login')
+
+// Subscription Plans State
+const billingCycle = ref('yearly') // 'monthly' or 'yearly'
+const activeSelectedPlan = ref(userPlan.value || 'basic')
+
+const selectPlan = (planId) => {
+  activeSelectedPlan.value = planId
+  setUserPlan(planId)
+  showToast(`Subscribed to ${planId.toUpperCase()} plan! Welcome to CareEquity.`, 'success')
+  setTimeout(() => {
+    setLoggedIn(true)
+    setShowLoginScreen(false)
+  }, 1000)
+}
 
 // Form Inputs
 const loginEmail = ref('')
@@ -112,15 +126,14 @@ const handleSignIn = async () => {
       showToast(errData.detail || 'Failed to authenticate.', 'error')
     } else {
       const data = await response.json()
-      showToast('Successfully authenticated!', 'success')
+      showToast('Successfully authenticated! Please select your plan.', 'success')
       // Save session info
       localStorage.setItem('docpat_logged_in', 'true')
       localStorage.setItem('user_email', data.email)
       localStorage.setItem('user_name', data.name)
       setTimeout(() => {
-        setLoggedIn(true)
-        setShowLoginScreen(false)
-      }, 1000)
+        currentStep.value = 'plans'
+      }, 600)
     }
   } catch (error) {
     showToast('Could not connect to authentication server.', 'error')
@@ -205,15 +218,14 @@ const handleVerifyOTP = async () => {
       showToast(errData.detail || 'OTP verification failed.', 'error')
     } else {
       const data = await response.json()
-      showToast('Successfully registered and authenticated!', 'success')
+      showToast('OTP verified! Select a subscription plan to continue.', 'success')
       // Save session info
       localStorage.setItem('docpat_logged_in', 'true')
       localStorage.setItem('user_email', data.email)
       localStorage.setItem('user_name', data.name)
       setTimeout(() => {
-        setLoggedIn(true)
-        setShowLoginScreen(false)
-      }, 1000)
+        currentStep.value = 'plans'
+      }, 600)
     }
   } catch (error) {
     showToast('Could not connect to authentication server.', 'error')
@@ -283,9 +295,9 @@ onUnmounted(() => {
       <div class="toast-bar"></div>
     </div>
 
-    <div class="auth-shell">
-      <!-- ── LEFT PANEL ── -->
-      <section class="left-panel">
+    <div class="auth-shell" :class="{ 'plans-mode': currentStep === 'plans' }">
+      <!-- ── LEFT PANEL (Shown during login, signup, otp) ── -->
+      <section v-if="currentStep !== 'plans'" class="left-panel">
         <!-- Close / Back Button -->
         <button class="auth-close-btn" @click="handleCancelLogin" title="Go Back">
           <span>← Back</span>
@@ -451,8 +463,134 @@ onUnmounted(() => {
         <div class="form-spacer"></div>
       </section>
 
-      <!-- ── RIGHT PANEL ── -->
-      <aside class="right-panel">
+      <!-- ── STEP 4: SUBSCRIPTION PLANS (Shown after OTP / Sign In) ── -->
+      <section v-else class="plans-full-container">
+        <button class="auth-close-btn" @click="handleCancelLogin" title="Skip Plan Selection">
+          <span>Skip & Exit →</span>
+        </button>
+
+        <div class="plans-header">
+          <div class="left-logo central">
+            <img src="/assets/careequity_logo.png" style="width: 36px; height: 36px; object-fit: contain;" alt="CareEquity Logo" />
+            <div class="brand-text">
+              <p class="brand-name" style="font-size: 20px;">CareEquity Plans</p>
+            </div>
+          </div>
+          <h1 class="plans-title">Select Your Subscription Plan</h1>
+          <p class="plans-sub">Empowering health equity with predictive SDOH intelligence & geospatial navigation.</p>
+          
+          <!-- Monthly / Yearly Billing Toggle -->
+          <div class="billing-toggle-container">
+            <span :class="{ active: billingCycle === 'monthly' }" @click="billingCycle = 'monthly'">Monthly</span>
+            <label class="switch">
+              <input type="checkbox" :checked="billingCycle === 'yearly'" @change="billingCycle = billingCycle === 'yearly' ? 'monthly' : 'yearly'" />
+              <span class="slider round"></span>
+            </label>
+            <span :class="{ active: billingCycle === 'yearly' }" @click="billingCycle = 'yearly'">
+              Yearly <span class="discount-badge">SAVE 10%</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- 4 Pricing Cards Grid -->
+        <div class="plans-grid">
+          
+          <!-- Plan 1: FREE -->
+          <div class="plan-card" :class="{ active: activeSelectedPlan === 'free' }">
+            <div class="card-plan-header">
+              <span class="plan-type">FREE</span>
+              <div class="plan-price-box">
+                <span class="currency">₹</span>
+                <span class="amount">0</span>
+                <span class="period">/mo</span>
+              </div>
+              <p class="plan-desc">Get started with a 15-day free trial — no credit card required. Full access to essential SDOH features.</p>
+            </div>
+
+            <ul class="features-list">
+              <li class="check"><span class="icon">✓</span> <strong>SDOH profile</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Basic SDOH assessment</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Nearby healthcare resources</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Food & nutrition resources</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Basic location map</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Chat bot assistance</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Basic resource search</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Limited personalized recommendations</strong></li>
+            </ul>
+
+            <button class="plan-action-btn free-btn" @click="selectPlan('free')">
+              {{ activeSelectedPlan === 'free' ? '✓ Current Plan' : 'Start Free' }}
+            </button>
+          </div>
+
+          <!-- Plan 2: BASIC (Featured / Default) -->
+          <div class="plan-card featured" :class="{ active: activeSelectedPlan === 'basic' }">
+            <div class="top-badge-row">
+              <span class="pop-badge">MOST POPULAR</span>
+              <span class="your-plan-badge">Your Plan</span>
+            </div>
+
+            <div class="card-plan-header">
+              <span class="plan-type">BASIC</span>
+              <div class="plan-price-box">
+                <span class="currency">₹</span>
+                <span class="amount">{{ billingCycle === 'yearly' ? '1069' : '99' }}</span>
+                <span class="period">{{ billingCycle === 'yearly' ? '/yr' : '/mo' }}</span>
+              </div>
+              <p class="plan-sub-price" v-if="billingCycle === 'yearly'">≈ ₹89/mo · save ₹119/yr</p>
+              <p class="plan-desc">Designed for care navigators &amp; individuals — essential SDOH tools with personalized support.</p>
+            </div>
+
+            <ul class="features-list">
+              <li class="check"><span class="icon">✓</span> <strong>Up to 100 patient SDOH assessments</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>CareMap 3D view & live OSRM directions</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>SDOH Risk Score & detailed assessment insights</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Personalized community resource recommendations</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Automated intervention matching engine</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Basic PDF & CSV report exports</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Email helpdesk support</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Chat bot unlimited</strong></li>
+            </ul>
+
+            <button class="plan-action-btn basic-btn" @click="selectPlan('basic')">
+              {{ activeSelectedPlan === 'basic' ? '✓ Subscribed' : 'Select Basic' }}
+            </button>
+          </div>
+
+          <!-- Plan 3: PRO -->
+          <div class="plan-card" :class="{ active: activeSelectedPlan === 'pro' }">
+            <div class="card-plan-header">
+              <span class="plan-type">PRO</span>
+              <div class="plan-price-box">
+                <span class="currency">₹</span>
+                <span class="amount">{{ billingCycle === 'yearly' ? '3228' : '269' }}</span>
+                <span class="period">{{ billingCycle === 'yearly' ? '/yr' : '/mo' }}</span>
+              </div>
+              <p class="plan-sub-price" v-if="billingCycle === 'yearly'">≈ ₹269/mo · save ₹360/yr</p>
+              <p class="plan-desc">Advanced SDOH analytics, AI insights, and predictive intelligence.</p>
+            </div>
+
+            <ul class="features-list">
+              <li class="check"><span class="icon">✓</span> <strong>Up to 500 patient SDOH assessments</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>CareMap 3D view & live OSRM directions</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Advanced SDOH Risk Score & analytics</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>AI-powered SDOH resource recommendations</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Automated intervention matching engine</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Advanced PDF & CSV report exports</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>Equity Map & population-level insights</strong></li>
+              <li class="check"><span class="icon">✓</span> <strong>AI SDOH Assistant for personalized guidance</strong></li>
+            </ul>
+
+            <button class="plan-action-btn pro-btn" @click="selectPlan('pro')">
+              {{ activeSelectedPlan === 'pro' ? '✓ Subscribed' : 'Get Pro' }}
+            </button>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ── RIGHT PANEL (Shown during login, signup, otp) ── -->
+      <aside v-if="currentStep !== 'plans'" class="right-panel">
         <div class="carousel">
           <div class="carousel-viewport">
             <div 
@@ -972,6 +1110,287 @@ onUnmounted(() => {
 
   .left-panel {
     padding: 32px 24px;
+  }
+}
+
+/* ── SUBSCRIPTION PLANS MODAL STYLES ── */
+.auth-shell.plans-mode {
+  display: block !important;
+  max-width: 1040px;
+  width: 95vw;
+  height: auto;
+  min-height: auto;
+  padding: 32px 36px;
+  background: #f8fafc;
+  overflow-y: auto;
+  max-height: 92vh;
+}
+
+.plans-full-container {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.left-logo.central {
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.plans-header {
+  text-align: center;
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+.plans-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 4px 0;
+}
+
+.plans-sub {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 18px;
+}
+
+/* Billing Toggle Switch */
+.billing-toggle-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  user-select: none;
+}
+.billing-toggle-container span {
+  cursor: pointer;
+}
+.billing-toggle-container span.active {
+  color: #0f172a;
+  font-weight: 800;
+}
+.discount-badge {
+  background: #e0f2fe;
+  color: #0284c7;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 800;
+  margin-left: 4px;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: #cbd5e1;
+  transition: .3s;
+  border-radius: 24px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+input:checked + .slider {
+  background-color: #2563eb;
+}
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* Pricing Grid */
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.plan-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 22px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+.plan-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+.plan-card.featured {
+  border: 2px solid #2563eb;
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.15);
+  background: #ffffff;
+}
+
+.top-badge-row {
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+.pop-badge {
+  background: #0369a1;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.5px;
+}
+.your-plan-badge {
+  background: #16a34a;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.card-plan-header {
+  margin-bottom: 12px;
+}
+.plan-type {
+  font-size: 11px;
+  font-weight: 800;
+  color: #475569;
+  letter-spacing: 1px;
+}
+.plan-price-box {
+  display: flex;
+  align-items: baseline;
+  margin: 4px 0 2px 0;
+}
+.plan-price-box .currency {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.plan-price-box .amount {
+  font-size: 28px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1;
+}
+.plan-price-box .period {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  margin-left: 2px;
+}
+.plan-sub-price {
+  font-size: 10.5px;
+  color: #2563eb;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.plan-desc {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.4;
+  margin-top: 4px;
+  min-height: 42px;
+}
+
+/* Feature Check List */
+.features-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.features-list li {
+  font-size: 11.5px;
+  color: #334155;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.35;
+}
+.features-list li.check .icon {
+  color: #2563eb;
+  font-weight: 800;
+}
+.features-list li.cross {
+  color: #94a3b8;
+}
+.features-list li.cross .icon {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+/* Action Button */
+.plan-action-btn {
+  width: 100%;
+  padding: 9px 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.plan-action-btn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+.plan-action-btn.basic-btn {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+.plan-action-btn.basic-btn:hover {
+  background: #16a34a;
+  color: white;
+}
+
+@media (max-width: 1100px) {
+  .plans-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .plans-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
