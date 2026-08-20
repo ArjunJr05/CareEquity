@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import IconBase from './src/components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from './src/store/appState'
-import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from './src/config'
-import { US_STATES, US_COUNTIES_BY_STATE } from './src/data/usData.js'
+import IconBase from '../components/dashboard/IconBase.vue'
+import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from '../store/appState'
+import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from '../config'
+import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
 const router = useRouter()
 
@@ -45,9 +45,21 @@ const isLoadingHistory = ref(false)
 const activeHistoryTab = ref('recent')
 
 const fetchUserHistory = async () => {
+  if (!isLoggedIn.value) {
+    userHistory.value = []
+    isLoadingHistory.value = false
+    return
+  }
   isLoadingHistory.value = true
   try {
-    const res = await fetch(`${MAIN_BACKEND_URL}/api/history/user/1`)
+    const userEmail = localStorage.getItem('user_email')
+    const userId = localStorage.getItem('user_id') || 1
+    
+    const fetchUrl = userEmail 
+      ? `${MAIN_BACKEND_URL}/api/history/email/${encodeURIComponent(userEmail)}`
+      : `${MAIN_BACKEND_URL}/api/history/user/${userId}`
+      
+    const res = await fetch(fetchUrl)
     if (res.ok) {
       const data = await res.json()
       userHistory.value = data
@@ -58,6 +70,14 @@ const fetchUserHistory = async () => {
     isLoadingHistory.value = false
   }
 }
+
+watch(isLoggedIn, (newVal) => {
+  if (newVal) {
+    fetchUserHistory()
+  } else {
+    userHistory.value = []
+  }
+}, { immediate: true })
 
 const toggleFavoriteItem = async (item) => {
   // Toggle locally immediately for instant feedback
@@ -72,6 +92,7 @@ const toggleFavoriteItem = async (item) => {
 }
 
 const displayedHistory = computed(() => {
+  if (!isLoggedIn.value) return []
   if (activeHistoryTab.value === 'favorites') {
     return userHistory.value.filter(i => !!i.is_favorite)
   }
@@ -79,8 +100,39 @@ const displayedHistory = computed(() => {
 })
 
 onMounted(() => {
-  fetchUserHistory()
+  if (isLoggedIn.value) {
+    fetchUserHistory()
+  }
 })
+
+const viewHistoryItem = (item) => {
+  if (item) {
+    setPatientData({
+      name: item.name || 'Patient Record',
+      age: item.age || 45,
+      gender: item.gender || 'Female',
+      diabetes: item.diabetes || 'No',
+      hypertension: item.hypertension || 'No',
+      heart_disease: item.heart_disease || 'No',
+      asthma: item.asthma || 'No',
+      previous_admission: item.previous_admission || 'No',
+      er_visits: item.er_visits || 0,
+      lat: item.lat || item.extra_data?.lat || 41.4993,
+      long: item.long || item.extra_data?.long || -81.6944,
+      medication_adherence: item.medication_adherence || item.extra_data?.medication_adherence || 85,
+      county: item.county || item.extra_data?.county || 'Cuyahoga County',
+      state: item.state || item.extra_data?.state || 'OH'
+    })
+    if (item.extra_data?.ml_prediction || item.ml_prediction) {
+      setMlPredictionResults(item.extra_data?.ml_prediction || item.ml_prediction)
+    }
+    if (item.extra_data?.prediction_model || item.prediction_model) {
+      setPredictionModelResults(item.extra_data?.prediction_model || item.prediction_model)
+    }
+  }
+  setAnalyzed(true)
+  router.push('/')
+}
 
 const formatDate = (isoStr) => {
   if (!isoStr) return 'Recently'
@@ -1041,7 +1093,17 @@ const handleAnalyze = async () => {
               <span style="font-size: 0.78rem; color: var(--text-secondary); font-weight: 600;">Saved Patient Assessments</span>
             </div>
 
-            <div v-if="isLoadingHistory" style="padding: 60px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; flex: 1;">
+            <div v-if="!isLoggedIn" style="padding: 60px 24px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; background: #f8fafc; border-radius: 12px; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px;">
+              <IconBase name="lock" :size="32" style="color: #94a3b8; margin-bottom: 12px;" />
+              <p style="margin: 0; font-weight: 600; color: #475569;">
+                Please sign in to view saved patient assessment records.
+              </p>
+              <button @click="triggerLogin" style="margin-top: 14px; background: #4f46e5; color: #ffffff; border: none; border-radius: 8px; padding: 9px 20px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: background 0.15s ease;">
+                Sign In
+              </button>
+            </div>
+
+            <div v-else-if="isLoadingHistory" style="padding: 60px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; flex: 1;">
               Loading assessment history...
             </div>
 
@@ -1064,7 +1126,7 @@ const handleAnalyze = async () => {
                     <th style="padding: 12px 14px;">Location</th>
                     <th style="padding: 12px 14px;">Conditions</th>
                     <th style="padding: 12px 14px;">Date Modified</th>
-                    <th style="padding: 12px 14px; text-align: right;">Download Data</th>
+                    <th style="padding: 12px 14px; text-align: right;">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1098,9 +1160,14 @@ const handleAnalyze = async () => {
                       {{ formatDate(item.timestamp || item.created_at) }}
                     </td>
                     <td style="padding: 14px; text-align: right;">
-                      <button @click="downloadHistoryItem(item)" title="Download Assessment Data" style="background: rgba(79, 70, 229, 0.08); border: 1px solid rgba(79, 70, 229, 0.2); color: #4f46e5; border-radius: 6px; padding: 7px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.78rem; transition: all 0.15s ease;">
-                        <IconBase name="download" :size="15" /> Download
-                      </button>
+                      <div style="display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end;">
+                        <button @click="viewHistoryItem(item)" title="View on Main Dashboard" style="background: #4f46e5; border: 1px solid #4f46e5; color: #ffffff; border-radius: 6px; padding: 7px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.78rem; transition: all 0.15s ease; box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);">
+                          <IconBase name="eye" :size="15" /> View
+                        </button>
+                        <button @click="downloadHistoryItem(item)" title="Download Assessment Data" style="background: #ffffff; border: 1px solid #4f46e5; color: #4f46e5; border-radius: 6px; padding: 7px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.78rem; transition: all 0.15s ease; box-shadow: 0 1px 2px rgba(79, 70, 229, 0.05);">
+                          <img src="/assets/download.gif" alt="Download" style="width: 16px; height: 16px; object-fit: contain;" /> Download
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>

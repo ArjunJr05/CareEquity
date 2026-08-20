@@ -3,6 +3,7 @@ import { onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from './components/dashboard/AppSidebar.vue'
 import AppHeader from './components/dashboard/AppHeader.vue'
+import FloatingChatbot from './components/dashboard/FloatingChatbot.vue'
 import { isAnalyzed, isLoggedIn, isAdmin, showLoginScreen, setPatientData } from './store/appState'
 import { MAIN_BACKEND_URL } from './config'
 
@@ -69,6 +70,7 @@ onMounted(async () => {
         <router-view />
       </div>
     </div>
+    <FloatingChatbot />
   </div>
 </template>
 
