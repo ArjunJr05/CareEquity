@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson } from '../store/appState'
+import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, setMlInputPayload } from '../store/appState'
 import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL } from '../config'
 import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
@@ -286,6 +286,17 @@ import mitchellPhoto from '../assets/dr_sarah_mitchell.png'
 
 const ocrRawJson = ref(null)
 const ocrStatus = ref({ checking: false, healthy: null, message: '' })
+const ocrExtractedFields = ref({
+  name: false,
+  age: false,
+  gender: false,
+  diabetes: false,
+  hypertension: false,
+  heart_disease: false,
+  asthma: false,
+  height_cm: false,
+  weight_kg: false
+})
 
 const checkOcrBackendHealth = async () => {
   ocrStatus.value.checking = true
@@ -312,6 +323,19 @@ const checkOcrBackendHealth = async () => {
 
 const uploadFileToOCR = async (file) => {
   isUploadingFile.value = true
+  // Reset extracted fields highlight
+  ocrExtractedFields.value = {
+    name: false,
+    age: false,
+    gender: false,
+    diabetes: false,
+    hypertension: false,
+    heart_disease: false,
+    asthma: false,
+    height_cm: false,
+    weight_kg: false
+  }
+
   try {
     const formData = new FormData()
     formData.append('file', file)
@@ -341,83 +365,129 @@ const uploadFileToOCR = async (file) => {
     // Extract root dataset
     const ext = result.data || result.extracted_data || result
     
-    // 1. Patient Demographics & Info
-    const pInfo = ext.patient_info || ext.demographics || ext.patient || {}
+    // Target structured patient info object first
+    const pInfo = ext.patient_info || ext.patient_details || ext.demographics || ext.patient || {}
     
-    // Name (check name, patient_name, full_name)
-    const rawName = pInfo.name || pInfo.patient_name || pInfo.full_name || ext.name || ext.patient_name
-    if (rawName) {
-      form.value.name = String(rawName).trim()
+    // 1. Patient Name (Target patient_info.patient_name, patient_info.name, or patient_info.full_name)
+    let rawName = pInfo.patient_name || pInfo.name || pInfo.full_name
+    
+    // Fallback search only if not found in patient_info, ignoring schema metadata field names
+    if (!rawName) {
+      if (typeof ext.patient_name === 'string') rawName = ext.patient_name
+      else if (typeof ext.name === 'string' && !ext.name.includes('.')) rawName = ext.name
     }
     
-    // Age (check age, patient_age)
-    const rawAge = pInfo.age || pInfo.patient_age || ext.age
-    if (rawAge) {
-      const parsedAge = parseInt(String(rawAge).replace(/[^0-9]/g, ''), 10)
-      if (!isNaN(parsedAge) && parsedAge > 0) form.value.age = parsedAge
-    }
-    
-    // Gender
-    const rawGender = pInfo.gender || pInfo.sex || ext.gender || ext.sex
-    if (rawGender) {
-      const g = String(rawGender).toLowerCase().trim()
-      if (g.startsWith('f') || g.includes('female')) form.value.gender = 'Female'
-      else if (g.startsWith('m') || g.includes('male')) form.value.gender = 'Male'
-      else form.value.gender = 'Other'
+    if (rawName && typeof rawName === 'string' && rawName.trim().length > 0 && !rawName.includes('.')) {
+      form.value.name = rawName.trim()
+      ocrExtractedFields.value.name = true
     }
 
-    // 2. Vital Signs (Height / Weight)
-    const vSigns = ext.vital_signs || ext.vitals || ext
-    const rawHeight = vSigns.height || vSigns.height_cm || pInfo.height
+    // 2. Age (Target patient_info.age or patient_info.patient_age)
+    let rawAge = pInfo.age !== undefined ? pInfo.age : pInfo.patient_age
+    if (rawAge === undefined) rawAge = ext.age !== undefined ? ext.age : ext.patient_age
+
+    if (rawAge !== null && rawAge !== undefined) {
+      const parsedAge = parseInt(String(rawAge).replace(/[^0-9]/g, ''), 10)
+      if (!isNaN(parsedAge) && parsedAge > 0 && parsedAge < 120) {
+        form.value.age = parsedAge
+        ocrExtractedFields.value.age = true
+      }
+    }
+
+    // 3. Gender (Target patient_info.gender or patient_info.sex)
+    let rawGender = pInfo.gender || pInfo.sex
+    if (!rawGender) rawGender = ext.gender || ext.sex
+
+    if (rawGender && typeof rawGender === 'string') {
+      const g = rawGender.toLowerCase().trim()
+      if (g.startsWith('f') || g.includes('female') || g.includes('woman')) {
+        form.value.gender = 'Female'
+        ocrExtractedFields.value.gender = true
+      } else if (g.startsWith('m') || g.includes('male') || g.includes('man')) {
+        form.value.gender = 'Male'
+        ocrExtractedFields.value.gender = true
+      } else {
+        form.value.gender = 'Other'
+        ocrExtractedFields.value.gender = true
+      }
+    }
+
+    // Target vitals object
+    const vitalsObj = ext.vital_signs || ext.vitals || {}
+
+    // 4. Height (cm)
+    const rawHeight = vitalsObj.height || vitalsObj.height_cm || vitalsObj.stature
     if (rawHeight) {
       const parsedH = parseFloat(String(rawHeight).replace(/[^0-9.]/g, ''))
-      if (!isNaN(parsedH) && parsedH > 0) form.value.height_cm = Math.round(parsedH)
+      if (!isNaN(parsedH) && parsedH > 0 && parsedH < 300) {
+        form.value.height_cm = Math.round(parsedH)
+        ocrExtractedFields.value.height_cm = true
+      }
     }
 
-    const rawWeight = vSigns.weight || vSigns.weight_kg || pInfo.weight
+    // 5. Weight (kg)
+    const rawWeight = vitalsObj.weight || vitalsObj.weight_kg || vitalsObj.mass
     if (rawWeight) {
       const parsedW = parseFloat(String(rawWeight).replace(/[^0-9.]/g, ''))
-      if (!isNaN(parsedW) && parsedW > 0) form.value.weight_kg = Math.round(parsedW)
+      if (!isNaN(parsedW) && parsedW > 0 && parsedW < 500) {
+        form.value.weight_kg = Math.round(parsedW)
+        ocrExtractedFields.value.weight_kg = true
+      }
     }
 
-    // 3. Clinical Context & Medical Conditions parsing (Diabetes, Hypertension, Heart Disease, Asthma)
-    const fullTextSearch = JSON.stringify(ext).toLowerCase()
+    // 6. Medical Conditions (Target medical_problems, clinical_context, root object, or full text)
+    const jsonString = JSON.stringify(ext).toLowerCase()
+    
+    const checkCondition = (keys) => {
+      // 1. Check inside sub-objects (medical_problems, clinical_context, etc.) or root object
+      for (const k of keys) {
+        const val = ext[k] || (ext.medical_problems && ext.medical_problems[k]) || (ext.clinical_context && ext.clinical_context[k]) || (ext.conditions && ext.conditions[k])
+        if (val !== undefined && val !== null && val !== '') {
+          const valStr = String(val).toLowerCase().trim()
+          if (valStr.includes('yes') || valStr.includes('true') || valStr.includes('high') || valStr.includes('positive') || valStr.includes('present') || valStr.includes('diagnosed')) {
+            return true
+          }
+          const matches = valStr.match(/(\d+(\.\d+)?)\s*%?/)
+          if (matches && matches[1] && parseFloat(matches[1]) > 20) return true
+        }
+      }
+      // 2. Check full text JSON for key presence or percentage > 20%
+      for (const k of keys) {
+        if (jsonString.includes(k)) {
+          const reg = new RegExp(`${k}[^\\d]*(\\d+(\\.\\d+)?)\\s*%?`, 'i')
+          const m = jsonString.match(reg)
+          if (m && m[1] && parseFloat(m[1]) > 20) return true
+          if (jsonString.includes(`high ${k}`) || jsonString.includes(`${k}: yes`) || jsonString.includes(`${k}: true`) || jsonString.includes(`history of ${k}`)) {
+            return true
+          }
+        }
+      }
+      return false
+    }
 
-    // Diabetes
-    if (fullTextSearch.includes('diabetes') || fullTextSearch.includes('diabetic')) {
+    if (checkCondition(['diabetes', 'diabetic', 'hba1c'])) {
       form.value.diabetes = 'Yes'
-    } else {
-      form.value.diabetes = 'No'
+      ocrExtractedFields.value.diabetes = true
     }
 
-    // Hypertension
-    if (fullTextSearch.includes('hypertension') || fullTextSearch.includes('high blood pressure') || fullTextSearch.includes('htn')) {
+    if (checkCondition(['hypertension', 'high_blood_pressure', 'htn', 'high blood pressure'])) {
       form.value.hypertension = 'Yes'
-    } else {
-      form.value.hypertension = 'No'
+      ocrExtractedFields.value.hypertension = true
     }
 
-    // Heart Disease
-    if (fullTextSearch.includes('heart disease') || fullTextSearch.includes('coronary') || fullTextSearch.includes('cardiac') || fullTextSearch.includes('cad')) {
+    if (checkCondition(['heart_disease', 'heart disease', 'coronary', 'cardiac', 'cad'])) {
       form.value.heart_disease = 'Yes'
-    } else {
-      form.value.heart_disease = 'No'
+      ocrExtractedFields.value.heart_disease = true
     }
 
-    // Asthma
-    if (fullTextSearch.includes('asthma') || fullTextSearch.includes('asthmatic')) {
+    if (checkCondition(['asthma', 'asthmatic', 'airway'])) {
       form.value.asthma = 'Yes'
-    } else {
-      form.value.asthma = 'No'
+      ocrExtractedFields.value.asthma = true
     }
 
-    let fieldsPopulated = false
-    if (pInfo.name || pInfo.patient_name || pInfo.age || pInfo.gender) {
-      fieldsPopulated = true
-    }
-
-    if (fieldsPopulated) {
-      showToast('OCR Complete', 'Document parsed! Patient fields populated.')
+    const countExtracted = Object.values(ocrExtractedFields.value).filter(Boolean).length
+    if (countExtracted > 0) {
+      showToast('OCR Complete', `Successfully extracted patient record! ${countExtracted} fields populated and highlighted in blue.`)
     } else {
       showToast('OCR Complete', 'Document processed! Raw OCR JSON is ready below. Please complete any blank fields.')
     }
@@ -519,8 +589,18 @@ const handleAnalyze = async () => {
     return
   }
 
-  // Save patient data in state
-  setPatientData(form.value)
+  // Transform locations into list of lists: [[county, state, country], [county, state, country], ...]
+  const locationsListOfLists = form.value.locations.map(loc => [
+    loc.county || '',
+    loc.state || '',
+    loc.country || ''
+  ])
+
+  // Save patient data in state including locations_list
+  setPatientData({
+    ...form.value,
+    locations_list: locationsListOfLists
+  })
 
   // Start analysis animation sequence
   isAnalyzing.value = true
@@ -532,6 +612,7 @@ const handleAnalyze = async () => {
   // Persist patient data to PostgreSQL backend database
   const savePatientPromise = (async () => {
     try {
+      const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
       const response = await fetch(`${MAIN_BACKEND_URL}/api/patients/`, {
         method: 'POST',
         headers: {
@@ -552,7 +633,11 @@ const handleAnalyze = async () => {
           medication_adherence: 85,
           height_cm: parseFloat(form.value.height_cm) || 170.0,
           weight_kg: parseFloat(form.value.weight_kg) || 70.0,
-          notes: form.value.notes || ''
+          notes: form.value.notes || '',
+          county: primaryLoc.county,
+          state: primaryLoc.state,
+          country: primaryLoc.country,
+          locations_list: locationsListOfLists
         })
       })
 
@@ -592,6 +677,7 @@ const handleAnalyze = async () => {
           state: primaryLoc.state,
           country: primaryLoc.country,
           all_locations: form.value.locations,
+          locations_list: locationsListOfLists,
           saved_at: new Date().toISOString()
         }
       }
@@ -630,20 +716,92 @@ const handleAnalyze = async () => {
         total_cholesterol_mg_dl: form.value.heart_disease === 'Yes' ? 240 : 185
       }
 
-      const zipcode = '44102' // Default Cuyahoga County zipcode for mapping SVI
-      const url = `${SYSTEM_BACKEND_URL}/api/v1/unified-predict?member_id=DEMO001&zipcode=${zipcode}`
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(healthMetrics)
-      })
-      
-      if (!response.ok) throw new Error('ML Predict HTTP error: ' + response.status)
-      const data = await response.json()
-      console.log('✓ Received ML unified prediction:', data)
+      const v2Payload = {
+        patient_id: form.value.name ? `PATIENT_${form.value.name.replace(/\s+/g, '_').toUpperCase()}` : 'OCR_PATIENT_001',
+        medical_data: healthMetrics,
+        target_locations: locationsListOfLists,
+        patient_data: {
+          name: form.value.name,
+          age: parseInt(form.value.age) || 45,
+          gender: form.value.gender,
+          diabetes: form.value.diabetes,
+          hypertension: form.value.hypertension,
+          heart_disease: form.value.heart_disease,
+          asthma: form.value.asthma,
+          height_cm: height,
+          weight_kg: weight
+        }
+      }
+
+      setMlInputPayload(v2Payload)
+
+      // 1. Send directly to ML Service V2 Model (ml_pipelineV2.pkl)
+      let data = null
+      try {
+        let v2Response = await fetch(`${MAIN_BACKEND_URL}/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(v2Payload)
+        })
+        if (!v2Response.ok) {
+          v2Response = await fetch(`http://localhost:8000/predict`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(v2Payload)
+          })
+        }
+        if (v2Response.ok) {
+          data = await v2Response.json()
+          console.log('✓ Received ML V2 (ml_pipelineV2.pkl) prediction:', data)
+        }
+      } catch (v2Err) {
+        console.warn('ML V2 direct endpoint failed, trying fallback:', v2Err)
+      }
+
+      // 2. Fallback to system backend if needed
+      if (!data) {
+        const zipcode = '44102'
+        const url = `${SYSTEM_BACKEND_URL}/api/v1/unified-predict?member_id=DEMO001&zipcode=${zipcode}`
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(healthMetrics)
+        })
+        if (!response.ok) throw new Error('ML Predict HTTP error: ' + response.status)
+        data = await response.json()
+      }
+
+      // Ensure normalized structures exist on V2 response for all frontend components
+      if (data && data.county_predictions && data.county_predictions.length > 0) {
+        const primaryDiseases = data.county_predictions[0].diseases
+        data.risk_scores = {
+          diabetes: primaryDiseases?.diabetes?.probability ?? 0.25,
+          hypertension: primaryDiseases?.hypertension?.probability ?? 0.32,
+          heart_disease: primaryDiseases?.heart_disease?.probability ?? 0.15,
+          asthma: primaryDiseases?.asthma?.probability ?? 0.10
+        }
+        data.risk_levels = {
+          diabetes: primaryDiseases?.diabetes?.risk_tier ?? 'Low',
+          hypertension: primaryDiseases?.hypertension?.risk_tier ?? 'Low',
+          heart_disease: primaryDiseases?.heart_disease?.risk_tier ?? 'Low',
+          asthma: primaryDiseases?.asthma?.risk_tier ?? 'Low'
+        }
+        const topSdohs = []
+        Object.values(primaryDiseases || {}).forEach(d => {
+          if (d.top_3_sdoh_factors) {
+            d.top_3_sdoh_factors.forEach(sf => {
+              const formattedName = sf.sdoh_factor.replace(/_/g, ' ')
+              if (!topSdohs.includes(formattedName)) topSdohs.push(formattedName)
+            })
+          }
+        })
+        data.sdoh_barriers = topSdohs.length > 0 ? topSdohs.slice(0, 4) : [
+          'Economic stability concerns',
+          'Primary healthcare access barrier',
+          'Transportation limitations'
+        ]
+      }
+
       setMlPredictionResults(data)
     } catch (err) {
       console.error('❌ Failed fetching ML prediction:', err)
@@ -991,22 +1149,22 @@ const handleAnalyze = async () => {
             <section class="form-section">
               <div class="form-grid">
                 <!-- Patient Name -->
-                <div class="form-field" :class="{ error: errors.name }">
-                  <label>Name *</label>
+                <div class="form-field" :class="{ error: errors.name, 'ocr-extracted': ocrExtractedFields.name }">
+                  <label>Name * <span v-if="ocrExtractedFields.name" class="ocr-tag">AI Extracted</span></label>
                   <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" />
                   <span v-if="errors.name" class="err-msg">Name is required</span>
                 </div>
 
                 <!-- Age -->
-                <div class="form-field" :class="{ error: errors.age }">
-                  <label>Age *</label>
+                <div class="form-field" :class="{ error: errors.age, 'ocr-extracted': ocrExtractedFields.age }">
+                  <label>Age * <span v-if="ocrExtractedFields.age" class="ocr-tag">AI Extracted</span></label>
                   <input type="number" v-model="form.age" placeholder="e.g., 54" class="setup-input" />
                   <span v-if="errors.age" class="err-msg">Age is required</span>
                 </div>
 
                 <!-- Gender -->
-                <div class="form-field">
-                  <label>Gender *</label>
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.gender }">
+                  <label>Gender * <span v-if="ocrExtractedFields.gender" class="ocr-tag">AI Extracted</span></label>
                   <div class="select-wrapper">
                     <select v-model="form.gender" class="setup-select">
                       <option>Female</option>
@@ -1018,8 +1176,8 @@ const handleAnalyze = async () => {
                 </div>
 
                 <!-- Diabetes -->
-                <div class="form-field">
-                  <label>Diabetes *</label>
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.diabetes }">
+                  <label>Diabetes * <span v-if="ocrExtractedFields.diabetes" class="ocr-tag">AI Extracted</span></label>
                   <div class="select-wrapper">
                     <select v-model="form.diabetes" class="setup-select">
                       <option>No</option>
@@ -1030,8 +1188,8 @@ const handleAnalyze = async () => {
                 </div>
 
                 <!-- Hypertension -->
-                <div class="form-field">
-                  <label>Hypertension *</label>
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.hypertension }">
+                  <label>Hypertension * <span v-if="ocrExtractedFields.hypertension" class="ocr-tag">AI Extracted</span></label>
                   <div class="select-wrapper">
                     <select v-model="form.hypertension" class="setup-select">
                       <option>No</option>
@@ -1042,8 +1200,8 @@ const handleAnalyze = async () => {
                 </div>
 
                 <!-- Heart Disease -->
-                <div class="form-field">
-                  <label>Heart Disease *</label>
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.heart_disease }">
+                  <label>Heart Disease * <span v-if="ocrExtractedFields.heart_disease" class="ocr-tag">AI Extracted</span></label>
                   <div class="select-wrapper">
                     <select v-model="form.heart_disease" class="setup-select">
                       <option>No</option>
@@ -1054,8 +1212,8 @@ const handleAnalyze = async () => {
                 </div>
 
                 <!-- Asthma -->
-                <div class="form-field">
-                  <label>Asthma *</label>
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.asthma }">
+                  <label>Asthma * <span v-if="ocrExtractedFields.asthma" class="ocr-tag">AI Extracted</span></label>
                   <div class="select-wrapper">
                     <select v-model="form.asthma" class="setup-select">
                       <option>No</option>
@@ -1066,15 +1224,15 @@ const handleAnalyze = async () => {
                 </div>
 
                 <!-- Height (cm) -->
-                <div class="form-field" :class="{ error: errors.height_cm }">
-                  <label>Height (cm) *</label>
+                <div class="form-field" :class="{ error: errors.height_cm, 'ocr-extracted': ocrExtractedFields.height_cm }">
+                  <label>Height (cm) * <span v-if="ocrExtractedFields.height_cm" class="ocr-tag">AI Extracted</span></label>
                   <input type="number" v-model="form.height_cm" placeholder="e.g., 170" class="setup-input" />
                   <span v-if="errors.height_cm" class="err-msg">Height is required</span>
                 </div>
 
                 <!-- Weight (kg) -->
-                <div class="form-field" :class="{ error: errors.weight_kg }">
-                  <label>Weight (kg) *</label>
+                <div class="form-field" :class="{ error: errors.weight_kg, 'ocr-extracted': ocrExtractedFields.weight_kg }">
+                  <label>Weight (kg) * <span v-if="ocrExtractedFields.weight_kg" class="ocr-tag">AI Extracted</span></label>
                   <input type="number" v-model="form.weight_kg" placeholder="e.g., 70" class="setup-input" />
                   <span v-if="errors.weight_kg" class="err-msg">Weight is required</span>
                 </div>
@@ -1156,22 +1314,40 @@ const handleAnalyze = async () => {
               <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
             </div>
 
-            <!-- OCR Extracted JSON Display Panel -->
-            <div v-if="ocrRawJson" style="margin-top: 16px; background: #0f172a; border-radius: 10px; border: 1px solid #1e293b; overflow: hidden;">
+            <!-- Consolidated Unified JSON Display Panel -->
+            <div style="margin-top: 16px; background: #0f172a; border-radius: 10px; border: 1px solid #1e293b; overflow: hidden;">
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #10b981;"></span>
-                  <h4 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #f8fafc; font-family: monospace;">OCR Extracted JSON Response</h4>
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #6366f1;"></span>
+                  <h4 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #f8fafc; font-family: monospace;">Consolidated Patient & Location JSON</h4>
                 </div>
-                <button 
-                  type="button" 
-                  @click="ocrRawJson = null"
-                  style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600;"
-                >
-                  ✕ Clear
-                </button>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600; font-family: monospace;">Locations: {{ form.locations.length }}</span>
+                  <button 
+                    v-if="ocrRawJson"
+                    type="button" 
+                    @click="ocrRawJson = null"
+                    style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600;"
+                  >
+                    ✕ Clear OCR
+                  </button>
+                </div>
               </div>
-              <pre style="margin: 0; padding: 16px; max-height: 280px; overflow-y: auto; color: #38bdf8; font-size: 0.78rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.4; white-space: pre-wrap;">{{ JSON.stringify(ocrRawJson, null, 2) }}</pre>
+              <pre style="margin: 0; padding: 16px; max-height: 320px; overflow-y: auto; color: #38bdf8; font-size: 0.78rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.4; white-space: pre-wrap;">{{ JSON.stringify({
+                patient_data: {
+                  name: form.name,
+                  age: form.age,
+                  gender: form.gender,
+                  diabetes: form.diabetes,
+                  hypertension: form.hypertension,
+                  heart_disease: form.heart_disease,
+                  asthma: form.asthma,
+                  height_cm: form.height_cm,
+                  weight_kg: form.weight_kg
+                },
+                target_locations: form.locations.map(loc => [loc.county || '', loc.state || '', loc.country || '']),
+                ocr_extracted_response: ocrRawJson || null
+              }, null, 2) }}</pre>
             </div>
           </div>
 
@@ -1869,6 +2045,35 @@ const handleAnalyze = async () => {
 .btn.gradient-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
+}
+
+/* OCR AI Extracted Field Highlighting (Blue theme) */
+.form-field.ocr-extracted .setup-input,
+.form-field.ocr-extracted .setup-select {
+  border-color: #3b82f6 !important;
+  background-color: #eff6ff !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18) !important;
+  color: #1e3a8a !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease-in-out;
+}
+
+.form-field.ocr-extracted label {
+  color: #1d4ed8 !important;
+  font-weight: 700;
+}
+
+.ocr-tag {
+  display: inline-block;
+  margin-left: 6px;
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .secure-footer-text {
