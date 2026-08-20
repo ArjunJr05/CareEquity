@@ -2,13 +2,17 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from './IconBase.vue'
-import { isLoggedIn, setLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
+import { isLoggedIn, isAdmin, setLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
 import { MAIN_BACKEND_URL } from '../../config'
 
 const router = useRouter()
 
+const isCurrentRouteAdmin = computed(() => {
+  return isAdmin.value || router.currentRoute.value.path.startsWith('/admin')
+})
+
 const userName = computed(() => {
-  return localStorage.getItem('user_name') || 'Jane Smith'
+  return localStorage.getItem('user_name') || (isAdmin.value ? 'Admin User' : 'Jane Smith')
 })
 
 const planBadgeText = computed(() => {
@@ -51,12 +55,13 @@ const handleLogout = async () => {
 <template>
   <header class="topbar">
     <div class="controls">
-      <button class="chip" @click="goToPlan" style="cursor: pointer; background: #eff6ff; border-color: #bfdbfe; color: #1d6bf3; font-weight: 600;" title="Manage Subscription Plan">
-        <IconBase name="sparkle" :size="15" />
+      <!-- Subscription plan badge (hidden for admin) -->
+      <button v-if="!isCurrentRouteAdmin" class="chip chip-plan" @click="goToPlan" style="cursor: pointer; background: #eff6ff; border-color: #bfdbfe; color: #1d6bf3; font-weight: 600;" title="Manage Subscription Plan">
+        <IconBase name="sparkle" :size="15" class="sparkle-icon" />
         {{ planBadgeText }}
       </button>
 
-      <button class="chip">
+      <button class="chip chip-location">
         <IconBase name="pin" :size="15" />
         United States
         <IconBase name="chevron-down" :size="14" />
@@ -138,8 +143,8 @@ const handleLogout = async () => {
   }
 }
 
-.chip:hover :deep(svg),
-.chip:hover svg,
+.chip-plan:hover .sparkle-icon,
+.chip-plan:hover :deep(.sparkle-icon),
 .btn-login-trigger:hover :deep(svg),
 .btn-login-trigger:hover svg {
   animation: iconSpin 3.5s linear infinite;
