@@ -9,6 +9,7 @@ import Reports from '../pages/Reports.vue'
 import Login from '../pages/Login.vue'
 import DataSetup from '../pages/DataSetup.vue'
 import Admin from '../pages/Admin.vue'
+import Plan from '../pages/Plan.vue'
 import { isAnalyzed, isLoggedIn, isAdmin } from '../store/appState'
 
 const router = createRouter({
@@ -28,6 +29,11 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: Admin,
+    },
+    {
+      path: '/plan',
+      name: 'plan',
+      component: Plan,
     },
     {
       path: '/',
@@ -79,7 +85,7 @@ router.beforeEach((to, from, next) => {
     // Normal user / guest flow
     if (to.name === 'admin') {
       next({ name: 'login' })
-    } else if (to.name !== 'setup' && to.name !== 'login' && !isAnalyzed.value) {
+    } else if (to.name !== 'setup' && to.name !== 'login' && to.name !== 'plan' && !isAnalyzed.value) {
       next({ name: 'setup' })
     } else if (to.name === 'setup' && isAnalyzed.value) {
       isAnalyzed.value = false

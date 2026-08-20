@@ -1,39 +1,202 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import * as maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import IconBase from '../components/dashboard/IconBase.vue'
 import { patientData, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
 import { MAIN_BACKEND_URL } from '../config'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 
-// Page States
+// MapLibre Worker Configuration
+if (typeof window !== 'undefined' && maplibregl.getWorkerUrl && !maplibregl.getWorkerUrl()) {
+  try {
+    maplibregl.setWorkerUrl(`https://unpkg.com/maplibre-gl@${maplibregl.getVersion ? maplibregl.getVersion() : '5.1.0'}/dist/maplibre-gl-worker.mjs`)
+  } catch (e) {
+    console.warn("Could not set worker URL dynamically:", e)
+  }
+}
+
+// Map Tile Styles (CartoDB Light Voyager & Dark Matter Raster Tiles)
+const isDarkMap = ref(false)
+const mapStyles = {
+  light: {
+    version: 8,
+    sources: {
+      'carto-light': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+        ],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
+      }
+    },
+    layers: [
+      {
+        id: 'carto-light-layer',
+        type: 'raster',
+        source: 'carto-light',
+        minzoom: 0,
+        maxzoom: 20
+      }
+    ]
+  },
+  dark: {
+    version: 8,
+    sources: {
+      'carto-dark': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        ],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
+      }
+    },
+    layers: [
+      {
+        id: 'carto-dark-layer',
+        type: 'raster',
+        source: 'carto-dark',
+        minzoom: 0,
+        maxzoom: 20
+      }
+    ]
+  }
+}
+
+// Mobile View Toggle State ('list' or 'map')
+const mobileTab = ref('list')
+
+watch(mobileTab, (newTab) => {
+  if (newTab === 'map' && mapInstance) {
+    nextTick(() => {
+      setTimeout(() => {
+        mapInstance.resize()
+      }, 100)
+    })
+  }
+})
+
+// Page & Filter States
 const selectedId = ref('cuyahoga')
 const searchQuery = ref('')
-const activeCategoryFilter = ref('all') // 'all', 'food', 'health', 'mental', 'transit', 'housing', 'social', 'pharmacy', 'other'
-const viewMode = ref('map') // 'map' or 'list'
+const activeCategoryFilter = ref('all')
 const radiusFilter = ref('25 miles')
 const isRadiusDropdownOpen = ref(false)
-const radiusOptionsList = ['10 miles', '25 miles', '50 miles']
+const radiusOptionsList = ['5 miles', '10 miles', '25 miles', '50 miles']
+
 const selectRadius = (val) => {
   radiusFilter.value = val
   isRadiusDropdownOpen.value = false
 }
 
-// Selected resource for the detail rail
-const selectedResource = ref(null)
+const isRegionDropdownOpen = ref(false)
+const countySearchQuery = ref('')
 
-const isCategoryDropdownOpen = ref(false)
-const activeCategoryLabel = computed(() => {
-  const matched = chips.value.find(c => c.id === activeCategoryFilter.value)
-  return matched ? matched.label : 'All'
+const regionOptions = [
+  // Primary Health Equity Anchors
+  { id: 'cuyahoga', name: 'Cuyahoga County, OH', city: 'Cleveland', lat: 41.4993, lon: -81.6944 },
+  { id: 'wayne', name: 'Wayne County, MI', city: 'Detroit', lat: 42.3314, lon: -83.0458 },
+  { id: 'marion', name: 'Marion County, IN', city: 'Indianapolis', lat: 39.7684, lon: -86.1581 },
+  { id: 'franklin', name: 'Franklin County, OH', city: 'Columbus', lat: 39.9612, lon: -82.9988 },
+
+  // Midwest & Regional Counties (as requested by user)
+  { id: 'rice', name: 'Rice County, KS', city: 'Lyons', lat: 38.3582, lon: -98.2014 },
+  { id: 'riley', name: 'Riley County, KS', city: 'Manhattan', lat: 39.1836, lon: -96.5717 },
+  { id: 'rooks', name: 'Rooks County, KS', city: 'Stockton', lat: 39.2635, lon: -99.3082 },
+  { id: 'rush', name: 'Rush County, KS', city: 'La Crosse', lat: 38.5303, lon: -99.3079 },
+  { id: 'russell', name: 'Russell County, KS', city: 'Russell', lat: 38.8878, lon: -98.8576 },
+  { id: 'saline', name: 'Saline County, KS', city: 'Salina', lat: 38.8403, lon: -97.6114 },
+  { id: 'scott', name: 'Scott County, KS', city: 'Scott City', lat: 38.4820, lon: -100.9080 },
+  { id: 'sedgwick', name: 'Sedgwick County, KS', city: 'Wichita', lat: 37.6872, lon: -97.3301 },
+  { id: 'seward', name: 'Seward County, KS', city: 'Liberal', lat: 37.1081, lon: -100.8679 },
+  { id: 'shawnee', name: 'Shawnee County, KS', city: 'Topeka', lat: 39.0558, lon: -95.6890 },
+  { id: 'sheridan', name: 'Sheridan County, KS', city: 'Hoxie', lat: 39.3562, lon: -100.4435 },
+  { id: 'sherman', name: 'Sherman County, KS', city: 'Goodland', lat: 39.3497, lon: -101.7132 },
+  { id: 'smith', name: 'Smith County, KS', city: 'Smith Center', lat: 39.7797, lon: -98.7845 },
+  { id: 'stafford', name: 'Stafford County, KS', city: 'St. John', lat: 38.0039, lon: -98.7562 },
+  { id: 'stanton', name: 'Stanton County, KS', city: 'Johnson City', lat: 37.5683, lon: -101.7850 },
+  { id: 'stevens', name: 'Stevens County, KS', city: 'Hugoton', lat: 37.1728, lon: -101.3482 },
+  { id: 'sumner', name: 'Sumner County, KS', city: 'Wellington', lat: 37.2661, lon: -97.3975 },
+  { id: 'thomas', name: 'Thomas County, KS', city: 'Colby', lat: 39.3908, lon: -100.8524 },
+  { id: 'trego', name: 'Trego County, KS', city: 'WaKeeney', lat: 38.9839, lon: -99.8821 },
+  { id: 'cook', name: 'Cook County, IL', city: 'Chicago', lat: 41.8781, lon: -87.6298 },
+  { id: 'mahoning', name: 'Mahoning County, OH', city: 'Youngstown', lat: 41.1000, lon: -80.6500 },
+  { id: 'summit', name: 'Summit County, OH', city: 'Akron', lat: 41.0814, lon: -81.5190 },
+  { id: 'lorain', name: 'Lorain County, OH', city: 'Elyria', lat: 41.3684, lon: -82.1076 },
+  { id: 'macomb', name: 'Macomb County, MI', city: 'Warren', lat: 42.5028, lon: -83.0288 },
+  { id: 'genesee', name: 'Genesee County, MI', city: 'Flint', lat: 43.0125, lon: -83.6875 },
+  { id: 'oakland', name: 'Oakland County, MI', city: 'Pontiac', lat: 42.6389, lon: -83.2911 },
+  { id: 'hamilton', name: 'Hamilton County, IN', city: 'Carmel', lat: 39.9784, lon: -86.0142 },
+  { id: 'hendricks', name: 'Hendricks County, IN', city: 'Danville', lat: 39.8153, lon: -86.5303 },
+  { id: 'delaware', name: 'Delaware County, OH', city: 'Delaware', lat: 40.2987, lon: -83.0680 }
+]
+
+const filteredRegionOptions = computed(() => {
+  if (!countySearchQuery.value.trim()) return regionOptions
+  const q = countySearchQuery.value.toLowerCase()
+  return regionOptions.filter(r => 
+    r.name.toLowerCase().includes(q) || 
+    (r.city && r.city.toLowerCase().includes(q))
+  )
 })
-const closeCategoryDropdown = (e) => {
-  if (!e.target.closest('.category-dropdown-wrapper')) {
-    isCategoryDropdownOpen.value = false
+
+const selectedRegionLabel = computed(() => {
+  if (customLat.value && customLng.value) {
+    return customLocationName.value || `Custom (${customLat.value.toFixed(2)}, ${customLng.value.toFixed(2)})`
+  }
+  const match = regionOptions.find(r => r.id === selectedId.value)
+  return match ? match.name : 'Select County / Region...'
+})
+
+function selectRegion(reg) {
+  selectedId.value = reg.id
+  customLat.value = null
+  customLng.value = null
+  isRegionDropdownOpen.value = false
+  countySearchQuery.value = ''
+  clearRoute()
+
+  const comm = resourcesData[reg.id]
+  const cLat = comm ? comm.centerLat : reg.lat
+  const cLng = comm ? comm.centerLng : reg.lon
+
+  fetchScrapedResources(cLat, cLng)
+  if (mapInstance) {
+    mapInstance.flyTo({
+      center: [cLng, cLat],
+      zoom: 12.5,
+      speed: 1.2
+    })
   }
 }
 
-// Toast notification state
+function openCustomModalFromDropdown() {
+  isRegionDropdownOpen.value = false
+  isCoordModalOpen.value = true
+}
+
+// Custom Coordinates Modal State
+const isCoordModalOpen = ref(false)
+const inputLat = ref('')
+const inputLng = ref('')
+const customLocationName = ref('')
+const customLat = ref(null)
+const customLng = ref(null)
+
+// Selected resource & routing state
+const selectedResource = ref(null)
+const bookmarkedIds = ref(new Set(['cuyahoga-food-1', 'cuyahoga-health-1']))
+
+// Live Navigation & Route Line State
+const activeRouteInfo = ref(null)
+const isRoutingLoading = ref(false)
+
+// Toast Notification State
 const toastMsg = ref('')
 const showToast = ref(false)
 
@@ -45,9 +208,6 @@ function triggerToast(msg) {
   }, 3000)
 }
 
-// Bookmark storage
-const bookmarkedIds = ref(new Set(['cuyahoga-food-1', 'cuyahoga-health-1']))
-
 function toggleBookmark(id) {
   if (bookmarkedIds.value.has(id)) {
     bookmarkedIds.value.delete(id)
@@ -58,234 +218,276 @@ function toggleBookmark(id) {
   }
 }
 
-// Mock Data for each county
+// Preset Communities Data
 const resourcesData = {
   cuyahoga: {
-    cityName: 'Cleveland',
-    mapCenterLabel: 'Cleveland',
-    mapSubLabels: ['Lakewood', 'Cleveland Heights', 'Brooklyn', 'Garfield Heights'],
-    categoriesCount: { food: 52, health: 78, mental: 36, transit: 24, housing: 31, social: 42, pharmacy: 28, other: 18 },
+    cityName: 'Cleveland, OH',
+    centerLat: 41.4993,
+    centerLng: -81.6944,
     resources: [
       {
+        id: 'cuyahoga-campaign-1',
+        name: 'Free Mobile Health & SDOH Screening',
+        category: 'campaign',
+        categoryLabel: 'Live Campaign',
+        verified: true,
+        isCampaign: true,
+        distance: 1.2,
+        rating: 5.0,
+        reviewsCount: 48,
+        services: ['Free blood pressure check', 'Glucose screening', 'SDOH Navigation', 'SNAP Signup'],
+        hoursText: 'Today: 9:00 AM - 4:00 PM',
+        eligibility: 'Open to all Cuyahoga residents. No insurance required.',
+        address: 'Public Square, Cleveland, OH 44113',
+        phone: '(216) 555-0199',
+        website: 'clevelandhealth.gov/mobile',
+        lat: 41.5005,
+        lon: -81.6930,
+        about: 'Urgent mobile healthcare screening truck offering free vitals check, diabetes risk evaluation, and direct referral to social services.'
+      },
+      {
         id: 'cuyahoga-food-1',
-        name: 'Cleveland Food Bank',
+        name: 'Greater Cleveland Food Bank',
         category: 'food',
         categoryLabel: 'Food Assistance',
         verified: true,
         distance: 2.3,
         rating: 4.8,
         reviewsCount: 124,
-        services: ['Food pantry', 'SNAP support', 'Nutrition programs', 'Senior food programs', 'Kid\'s programs'],
+        services: ['Food pantry', 'SNAP support', 'Nutrition programs', 'Senior food boxes'],
         hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
         eligibility: 'All residents welcome. No proof of income required.',
         address: '15500 S Waterloo Rd, Cleveland, OH 44110',
         phone: '(216) 738-2067',
         website: 'clevelandfoodbank.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:30 AM - 4:30 PM' },
-          { days: 'Sat', time: '9:00 AM - 12:00 PM' },
-          { days: 'Sun', time: 'Closed' }
-        ],
-        about: 'Cleveland Food Bank provides nutritious food to individuals and families in need through our network of partner agencies and programs.',
-        whyRecommended: 'This resource addresses food insecurity which is a key factor contributing to elevated risk in this community.',
-        mapPos: { x: 90, y: 35 }
+        lat: 41.5645,
+        lon: -81.5623,
+        about: 'Provides emergency food assistance and nutrition counseling to help families achieve food security.'
       },
       {
         id: 'cuyahoga-health-1',
-        name: 'MetroHealth Community Clinic',
+        name: 'MetroHealth Community Health Center',
         category: 'health',
-        categoryLabel: 'Healthcare',
+        categoryLabel: 'Healthcare Clinic',
         verified: true,
         distance: 3.1,
         rating: 4.5,
         reviewsCount: 92,
-        services: ['Primary care', 'Preventive care', 'Chronic disease mgmt', 'Sliding scale assistance'],
+        services: ['Primary care', 'Preventive care', 'Chronic disease mgmt', 'Sliding scale'],
         hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'Uninsured & insured. Sliding scale payment option.',
+        eligibility: 'Uninsured & insured welcome. Sliding scale fees.',
         address: '2500 Metrohealth Dr, Cleveland, OH 44109',
         phone: '(216) 778-7800',
         website: 'metrohealth.org/community',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:00 AM - 5:00 PM' },
-          { days: 'Sat', time: '8:00 AM - 12:00 PM' },
-          { days: 'Sun', time: 'Closed' }
-        ],
-        about: 'MetroHealth Community Clinic offers comprehensive medical services for adults and children, focusing on preventive health and wellness.',
-        whyRecommended: 'This resource bridges critical healthcare accessibility gaps and reduces avoidable ER visits.',
-        mapPos: { x: 55, y: 70 }
+        lat: 41.4705,
+        lon: -81.6980,
+        about: 'Comprehensive ambulatory healthcare clinic serving low-income individuals with sliding fee scale financial aid.'
       },
       {
         id: 'cuyahoga-mental-1',
-        name: 'Neighborhood Family Services',
+        name: 'Neighborhood Family Mental Health Services',
         category: 'mental',
         categoryLabel: 'Mental Health',
         verified: true,
         distance: 3.4,
         rating: 4.4,
         reviewsCount: 76,
-        services: ['Counseling', 'Psychiatry', 'Support groups', 'Crisis management'],
+        services: ['Counseling', 'Psychiatry', 'Support groups', 'Crisis intervention'],
         hoursText: 'Mon - Fri: 9:00 AM - 6:00 PM',
-        eligibility: 'All residents. Medicaid and private insurance accepted.',
+        eligibility: 'All residents. Medicaid & Medicare accepted.',
         address: '11627 Clifton Blvd, Cleveland, OH 44102',
         phone: '(216) 281-2400',
         website: 'neofamily.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '9:00 AM - 6:00 PM' },
-          { days: 'Sat & Sun', time: 'Closed' }
-        ],
-        about: 'Providing accessible, high-quality counseling and outpatient psychiatric services to help families navigate mental wellness.',
-        whyRecommended: 'Addresses high rates of mental health risk indicators flagged in the area.',
-        mapPos: { x: 35, y: 55 }
+        lat: 41.4880,
+        lon: -81.7680,
+        about: 'Community mental health agency offering behavioral therapy and outpatient substance recovery support.'
       },
       {
         id: 'cuyahoga-transit-1',
-        name: 'RTA Community Transit Center',
+        name: 'RTA Community Mobility Center',
         category: 'transit',
         categoryLabel: 'Transportation',
         verified: true,
         distance: 1.8,
         rating: 4.1,
         reviewsCount: 64,
-        services: ['Bus passes', 'Route info', 'Paratransit services', 'Accessibility help'],
+        services: ['Medical transit passes', 'Paratransit service', 'Subsidized fare cards'],
         hoursText: 'Mon - Sun: 6:00 AM - 8:00 PM',
-        eligibility: 'All residents eligible. Seniors/Disabled qualify for discounts.',
+        eligibility: 'Low income & seniors qualify for free medical transport vouchers.',
         address: '1240 W 6th St, Cleveland, OH 44113',
         phone: '(216) 621-9500',
         website: 'riderta.com',
-        hoursList: [
-          { days: 'Mon - Sun', time: '6:00 AM - 8:00 PM' }
-        ],
-        about: 'RTA provides safe, reliable public transportation services connecting Greater Cleveland residents to jobs, medical centers, and schools.',
-        whyRecommended: 'Mitigates transportation barriers preventing members from attending scheduled checkups.',
-        mapPos: { x: 62, y: 48 }
+        lat: 41.4980,
+        lon: -81.6970,
+        about: 'Provides reliable transportation assistance connecting patients directly to medical appointments.'
       },
       {
         id: 'cuyahoga-housing-1',
-        name: 'Cleveland Housing Network',
+        name: 'Cleveland Housing & Utility Action Network',
         category: 'housing',
         categoryLabel: 'Housing & Utilities',
         verified: false,
         distance: 4.2,
         rating: 4.3,
         reviewsCount: 88,
-        services: ['Utility assistance', 'Rental counseling', 'Affordable housing leasing'],
+        services: ['Utility aid', 'Emergency rental assistance', 'Weatherization'],
         hoursText: 'Mon - Fri: 8:30 AM - 5:00 PM',
-        eligibility: 'Low-to-moderate income residents of Cuyahoga County.',
+        eligibility: 'Cuyahoga County low-to-moderate income households.',
         address: '2999 Payne Ave, Cleveland, OH 44114',
         phone: '(216) 574-7100',
         website: 'chnhousingpartners.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:30 AM - 5:00 PM' }
-        ],
-        about: 'CHN is a coalition of housing developers working to secure affordable housing and utility support programs for families.',
-        whyRecommended: 'Combats housing instability which directly impacts chronic disease outcomes.',
-        mapPos: { x: 78, y: 40 }
+        lat: 41.5055,
+        lon: -81.6710,
+        about: 'Helps families maintain safe, affordable housing and prevents utility disconnections.'
       },
       {
         id: 'cuyahoga-social-1',
-        name: 'Step Forward Social Services',
+        name: 'Step Forward Social Community Services',
         category: 'social',
         categoryLabel: 'Social Services',
         verified: true,
         distance: 2.9,
         rating: 4.6,
         reviewsCount: 51,
-        services: ['Emergency aid', 'Head start education', 'Job training classes'],
+        services: ['Emergency cash assistance', 'Head Start', 'Job placement'],
         hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'Families meeting income threshold guidelines.',
+        eligibility: 'Income-eligible families in Cuyahoga County.',
         address: '1801 Superior Ave, Cleveland, OH 44114',
         phone: '(216) 696-9077',
         website: 'stepforwardtoday.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:00 AM - 5:00 PM' }
-        ],
-        about: 'Ohio\'s largest Community Action Agency helping individuals find immediate relief and long-term economic independence.',
-        whyRecommended: 'Resolves immediate economic distress in high social vulnerability index (SVI) tracts.',
-        mapPos: { x: 82, y: 45 }
+        lat: 41.5040,
+        lon: -81.6820,
+        about: 'Community Action Agency fighting poverty by providing family support services and career development.'
+      },
+      {
+        id: 'cuyahoga-gym-1',
+        name: 'YMCA Downtown Fitness & Community Center',
+        category: 'gym',
+        categoryLabel: 'Fitness & Wellness',
+        verified: true,
+        distance: 1.5,
+        rating: 4.7,
+        reviewsCount: 110,
+        services: ['Subsidized gym passes', 'Diabetes prevention classes', 'Senior fitness'],
+        hoursText: 'Mon - Fri: 5:30 AM - 9:00 PM',
+        eligibility: 'Financial assistance available for low-income memberships.',
+        address: '2200 Prospect Ave E, Cleveland, OH 44115',
+        phone: '(216) 344-7700',
+        website: 'clevelandymca.org',
+        lat: 41.5000,
+        lon: -81.6780,
+        about: 'Offers physical wellness programs and chronic disease management exercise groups.'
+      },
+      {
+        id: 'cuyahoga-park-1',
+        name: 'Edgewater Park & Community Green Space',
+        category: 'park',
+        categoryLabel: 'Parks & Recreation',
+        verified: true,
+        distance: 3.8,
+        rating: 4.9,
+        reviewsCount: 340,
+        services: ['Walking trails', 'Fresh air recreation', 'Outdoor fitness equipment'],
+        hoursText: 'Mon - Sun: 6:00 AM - 11:00 PM',
+        eligibility: 'Free public park.',
+        address: '6500 Cleveland Memorial Shoreway, Cleveland, OH 44102',
+        phone: '(216) 635-3200',
+        website: 'clevelandmetroparks.com',
+        lat: 41.4885,
+        lon: -81.7340,
+        about: 'Expansive green space and beachfront promoting physical health and community recreation.'
       }
     ]
   },
   wayne: {
-    cityName: 'Detroit',
-    mapCenterLabel: 'Detroit',
-    mapSubLabels: ['Dearborn', 'Grosse Pointe', 'Hamtramck', 'Brooklyn (MI)'],
-    categoriesCount: { food: 61, health: 84, mental: 42, transit: 31, housing: 48, social: 55, pharmacy: 36, other: 22 },
+    cityName: 'Detroit, MI',
+    centerLat: 42.3314,
+    centerLng: -83.0458,
     resources: [
       {
+        id: 'wayne-campaign-1',
+        name: 'Detroit Community Vaccine & Wellness Drive',
+        category: 'campaign',
+        categoryLabel: 'Live Campaign',
+        verified: true,
+        isCampaign: true,
+        distance: 1.1,
+        rating: 4.9,
+        reviewsCount: 65,
+        services: ['Flu & COVID vaccines', 'Blood pressure screenings', 'Nutrition boxes'],
+        hoursText: 'Today: 8:00 AM - 5:00 PM',
+        eligibility: 'All Detroit & Wayne County residents.',
+        address: 'Hart Plaza, Detroit, MI 48226',
+        phone: '(313) 555-0188',
+        website: 'detroitmi.gov/health',
+        lat: 42.3285,
+        lon: -83.0440,
+        about: 'Free health initiative serving high-priority tracts with preventive health checks and wellness packages.'
+      },
+      {
         id: 'wayne-food-1',
-        name: 'Gleaners Community Food Bank',
+        name: 'Gleaners Community Food Bank of SE Michigan',
         category: 'food',
         categoryLabel: 'Food Assistance',
         verified: true,
         distance: 1.5,
         rating: 4.9,
         reviewsCount: 204,
-        services: ['Mobile pantry', 'SNAP assistance', 'Youth nutrition', 'Fresh food distributions'],
+        services: ['Mobile food pantry', 'Fresh produce distribution', 'Youth meals'],
         hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
         eligibility: 'All Southeast Michigan residents.',
         address: '2131 Beaufait St, Detroit, MI 48207',
         phone: '(866) 453-2637',
         website: 'gcfb.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:00 AM - 5:00 PM' },
-          { days: 'Sat', time: '9:00 AM - 1:00 PM' }
-        ],
-        about: 'Gleaners provides millions of pounds of emergency food annually to schools, soup kitchens, and pantries across Southeast Michigan.',
-        whyRecommended: 'Directly addresses critical food deserts and food insecurity in the Detroit metropolitan area.',
-        mapPos: { x: 80, y: 45 }
+        lat: 42.3550,
+        lon: -83.0130,
+        about: 'Distributes nutritious food to local pantries and emergency food programs throughout Wayne County.'
       },
       {
         id: 'wayne-health-1',
-        name: 'Covenant Community Care Center',
+        name: 'Covenant Community Care Health Center',
         category: 'health',
-        categoryLabel: 'Healthcare',
+        categoryLabel: 'Healthcare Clinic',
         verified: true,
         distance: 2.8,
         rating: 4.6,
         reviewsCount: 115,
-        services: ['Family medicine', 'Dental clinic', 'Behavioral health', 'Prescription help'],
+        services: ['Family medicine', 'Dental clinic', 'Behavioral health'],
         hoursText: 'Mon - Fri: 8:30 AM - 5:00 PM',
-        eligibility: 'All patients welcome. Sliding fee scale for uninsured.',
+        eligibility: 'Sliding fee scale for uninsured patients.',
         address: '5716 Michigan Ave, Detroit, MI 48210',
         phone: '(313) 554-0485',
         website: 'covenantcommunitycare.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:30 AM - 5:00 PM' }
-        ],
-        about: 'A faith-based community health center providing high-quality care to patients regardless of their ability to pay.',
-        whyRecommended: 'Fills crucial healthcare gaps in regions with high uninsured rates.',
-        mapPos: { x: 45, y: 65 }
-      },
-      {
-        id: 'wayne-transit-1',
-        name: 'DDOT Transit Center',
-        category: 'transit',
-        categoryLabel: 'Transportation',
-        verified: true,
-        distance: 2.1,
-        rating: 4.0,
-        reviewsCount: 52,
-        services: ['Bus passes', 'Route maps', 'ADA shuttle services'],
-        hoursText: 'Mon - Sun: 5:00 AM - 11:00 PM',
-        eligibility: 'All residents.',
-        address: '1301 E Warren Ave, Detroit, MI 48207',
-        phone: '(313) 933-1300',
-        website: 'detroitmi.gov/ddot',
-        hoursList: [
-          { days: 'Mon - Sun', time: '5:00 AM - 11:00 PM' }
-        ],
-        about: 'DDOT is the primary public transit provider in Detroit, committed to providing clean, safe, and efficient transportation.',
-        whyRecommended: 'Enables critical transit access for medical appointments.',
-        mapPos: { x: 70, y: 35 }
+        lat: 42.3260,
+        lon: -83.0980,
+        about: 'Community health center delivering comprehensive medical and dental services to underinsured populations.'
       }
     ]
   },
   marion: {
-    cityName: 'Indianapolis',
-    mapCenterLabel: 'Indianapolis',
-    mapSubLabels: ['Speedway', 'Lawrence', 'Greenwood', 'Carmel'],
-    categoriesCount: { food: 38, health: 59, mental: 28, transit: 19, housing: 24, social: 33, pharmacy: 21, other: 12 },
+    cityName: 'Indianapolis, IN',
+    centerLat: 39.7684,
+    centerLng: -86.1581,
     resources: [
+      {
+        id: 'marion-health-1',
+        name: 'Eskenazi Health Center Pecar',
+        category: 'health',
+        categoryLabel: 'Healthcare Clinic',
+        verified: true,
+        distance: 2.6,
+        rating: 4.4,
+        reviewsCount: 89,
+        services: ['Primary care', 'Pediatrics', 'Dental care', 'SDOH navigation'],
+        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
+        eligibility: 'Financial assistance available based on income.',
+        address: '6940 Michigan Rd, Indianapolis, IN 46268',
+        phone: '(317) 266-2901',
+        website: 'eskenazihealth.edu',
+        lat: 39.8810,
+        lon: -86.2120,
+        about: 'Comprehensive primary care safety-net health anchor serving Indianapolis communities.'
+      },
       {
         id: 'marion-food-1',
         name: 'Gleaners Food Bank of Indiana',
@@ -295,48 +497,22 @@ const resourcesData = {
         distance: 3.2,
         rating: 4.8,
         reviewsCount: 145,
-        services: ['Emergency pantry', 'Mobile distributions', 'SNAP registration support'],
+        services: ['Pantry assistance', 'SNAP enrollment', 'Mobile market'],
         hoursText: 'Mon - Fri: 9:00 AM - 4:00 PM',
-        eligibility: 'Indiana residents meeting USDA program guidelines.',
+        eligibility: 'Indiana residents meeting income guidelines.',
         address: '3737 Waldemere Ave, Indianapolis, IN 46241',
         phone: '(317) 925-0191',
         website: 'gleaners.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '9:00 AM - 4:00 PM' }
-        ],
-        about: 'Gleaners works to store and distribute food to local soup kitchens, food pantries, and shelters across Indianapolis.',
-        whyRecommended: 'Combats regional food access gaps highlighted in the SDOH factors.',
-        mapPos: { x: 30, y: 75 }
-      },
-      {
-        id: 'marion-health-1',
-        name: 'Eskenazi Health Center Pecar',
-        category: 'health',
-        categoryLabel: 'Healthcare',
-        verified: true,
-        distance: 2.6,
-        rating: 4.4,
-        reviewsCount: 89,
-        services: ['Primary care', 'Pediatrics', 'Dental care', 'Nutrition coaching'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'All patients. Financial assistance available based on household size.',
-        address: '6940 Michigan Rd, Indianapolis, IN 46268',
-        phone: '(317) 266-2901',
-        website: 'eskenazihealth.edu',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:00 AM - 5:00 PM' }
-        ],
-        about: 'Eskenazi Health Center provides comprehensive family medicine and dental services, serving as a primary neighborhood health anchor.',
-        whyRecommended: 'Closes community care gaps for high-risk diabetic and hypertensive patients.',
-        mapPos: { x: 50, y: 30 }
+        lat: 39.7340,
+        lon: -86.2410,
+        about: 'Emergency food distribution hub supplying fresh produce and essential groceries across Marion County.'
       }
     ]
   },
   franklin: {
-    cityName: 'Columbus',
-    mapCenterLabel: 'Columbus',
-    mapSubLabels: ['Grandview Heights', 'Bexley', 'Upper Arlington', 'Worthington'],
-    categoriesCount: { food: 41, health: 62, mental: 31, transit: 20, housing: 28, social: 38, pharmacy: 25, other: 15 },
+    cityName: 'Columbus, OH',
+    centerLat: 39.9612,
+    centerLng: -82.9988,
     resources: [
       {
         id: 'franklin-food-1',
@@ -349,80 +525,63 @@ const resourcesData = {
         reviewsCount: 162,
         services: ['Food pantry', 'Mobile markets', 'Nutrition education'],
         hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
-        eligibility: 'All residents of Franklin County.',
+        eligibility: 'Franklin County residents.',
         address: '3960 Brookham Dr, Grove City, OH 43123',
         phone: '(614) 278-3130',
         website: 'mofc.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:30 AM - 4:30 PM' },
-          { days: 'Sat', time: '9:00 AM - 1:00 PM' }
-        ],
-        about: 'Connecting hungry neighbors with nutritious food, the Mid-Ohio Food Collective aims to stabilize communities.',
-        whyRecommended: 'Directly counters food insecurity trends observed in local tracts.',
-        mapPos: { x: 35, y: 80 }
+        lat: 39.8780,
+        lon: -83.0520,
+        about: 'Leading regional food bank stabilizing low-income neighborhoods with essential nutrition.'
       },
       {
         id: 'franklin-health-1',
         name: 'PrimaryOne Health Center',
         category: 'health',
-        categoryLabel: 'Healthcare',
+        categoryLabel: 'Healthcare Clinic',
         verified: true,
         distance: 1.9,
         rating: 4.5,
         reviewsCount: 97,
-        services: ['Family medicine', 'OB/GYN services', 'Mental health therapy'],
+        services: ['Family medicine', 'OB/GYN', 'Mental health counseling'],
         hoursText: 'Mon - Fri: 8:00 AM - 5:30 PM',
-        eligibility: 'Uninsured/Insured welcome. Offers sliding fees.',
+        eligibility: 'Sliding scale pricing available.',
         address: '190 Carpenter St, Columbus, OH 43205',
         phone: '(614) 645-0556',
         website: 'primaryonehealth.org',
-        hoursList: [
-          { days: 'Mon - Fri', time: '8:00 AM - 5:30 PM' }
-        ],
-        about: 'Providing access to high-quality healthcare services to ensure wellness for all members of the community.',
-        whyRecommended: 'Strengthens maternal-health and chronic disease preventive management.',
-        mapPos: { x: 75, y: 55 }
+        lat: 39.9570,
+        lon: -82.9750,
+        about: 'Federally qualified community health center addressing maternal care and chronic disease prevention.'
       }
     ]
   }
 }
 
-const activeCommunity = computed(() => resourcesData[selectedId.value])
+const activeCommunity = computed(() => resourcesData[selectedId.value] || resourcesData.cuyahoga)
 
-// Scraping and Live Resources Data State
+// Backend API Scraped Resources
 const scrapedResources = ref([])
 const isLoadingScrape = ref(false)
 
 const currentResources = computed(() => {
-  if (isAnalyzed.value) {
+  if (isAnalyzed.value && scrapedResources.value.length > 0) {
     return scrapedResources.value
-  } else {
-    return activeCommunity.value.resources
   }
+  return activeCommunity.value.resources
 })
 
-// Chips definition based on state
-const chips = computed(() => {
-  if (isAnalyzed.value) {
-    return [
-      { id: 'all', label: 'All', imgSrc: '/assets/infinity.png', colorClass: 'grey' },
-      { id: 'food', label: 'Food Access', imgSrc: '/assets/fork-and-knife.png', colorClass: 'orange' },
-      { id: 'clinic', label: 'Healthcare Clinics', imgSrc: '/assets/healthcare.png', colorClass: 'green' },
-      { id: 'gym', label: 'Fitness & Gyms', imgSrc: '/assets/dumbbell.png', colorClass: 'purple' },
-      { id: 'park', label: 'Parks & Green Space', imgSrc: '/assets/park.png', colorClass: 'blue' }
-    ]
-  } else {
-    return [
-      { id: 'all', label: 'All', imgSrc: '/assets/infinity.png', colorClass: 'grey' },
-      { id: 'food', label: 'Food Access', imgSrc: '/assets/fork-and-knife.png', colorClass: 'orange' },
-      { id: 'health', label: 'Healthcare', imgSrc: '/assets/healthcare.png', colorClass: 'green' },
-      { id: 'mental', label: 'Mental Health', imgSrc: '/assets/dumbbell.png', colorClass: 'purple' },
-      { id: 'transit', label: 'Transportation', icon: 'trend', colorClass: 'blue' },
-      { id: 'housing', label: 'Housing', icon: 'home', colorClass: 'pink' },
-      { id: 'social', label: 'Social Services', icon: 'users', colorClass: 'rose' }
-    ]
-  }
-})
+// Categories Chip List
+const categories = [
+  { id: 'all', label: 'All Resources', icon: 'map', colorClass: 'grey' },
+  { id: 'campaign', label: 'Live Campaigns', icon: 'sparkle', colorClass: 'blue', isSpecial: true },
+  { id: 'health', label: 'Healthcare', icon: 'pulse', colorClass: 'green' },
+  { id: 'food', label: 'Food Access', icon: 'pin', colorClass: 'orange' },
+  { id: 'mental', label: 'Mental Health', icon: 'heart', colorClass: 'purple' },
+  { id: 'transit', label: 'Transportation', icon: 'trend', colorClass: 'blue' },
+  { id: 'housing', label: 'Housing & Utilities', icon: 'home', colorClass: 'pink' },
+  { id: 'social', label: 'Social Services', icon: 'users', colorClass: 'rose' },
+  { id: 'gym', label: 'Fitness & Wellness', icon: 'target', colorClass: 'purple' },
+  { id: 'park', label: 'Parks & Open Space', icon: 'bulb', colorClass: 'green' }
+]
 
 function getCategoryCount(catId) {
   let list = currentResources.value
@@ -430,122 +589,462 @@ function getCategoryCount(catId) {
   if (radiusFilter.value) {
     const maxMiles = parseFloat(radiusFilter.value)
     if (!isNaN(maxMiles)) {
-      list = list.filter(r => r.distance <= maxMiles)
+      list = list.filter(r => (r.distance || 0) <= maxMiles)
     }
   }
-  
+
   if (searchQuery.value.trim() !== '') {
     const q = searchQuery.value.toLowerCase()
     list = list.filter(r => 
-      r.name.toLowerCase().includes(q) || 
+      r.name.toLowerCase().includes(q) ||
       (r.services && r.services.some(s => s.toLowerCase().includes(q))) ||
       (r.about && r.about.toLowerCase().includes(q))
     )
   }
 
-  if (catId === 'all') {
-    return list.length
-  }
+  if (catId === 'all') return list.length
   return list.filter(r => r.category === catId).length
 }
 
-// Filter and Search Logic
+// Filtered Resources List
 const filteredResources = computed(() => {
   let list = currentResources.value
 
-  // 1. Filter by category
   if (activeCategoryFilter.value !== 'all') {
     list = list.filter(r => r.category === activeCategoryFilter.value)
   }
 
-  // 2. Filter by search query
   if (searchQuery.value.trim() !== '') {
     const q = searchQuery.value.toLowerCase()
     list = list.filter(r => 
-      r.name.toLowerCase().includes(q) || 
+      r.name.toLowerCase().includes(q) ||
       (r.services && r.services.some(s => s.toLowerCase().includes(q))) ||
-      (r.about && r.about.toLowerCase().includes(q))
+      (r.about && r.about.toLowerCase().includes(q)) ||
+      (r.address && r.address.toLowerCase().includes(q))
     )
   }
 
-  // 3. Filter by radius (miles)
   if (radiusFilter.value) {
     const maxMiles = parseFloat(radiusFilter.value)
     if (!isNaN(maxMiles)) {
-      list = list.filter(r => r.distance <= maxMiles)
+      list = list.filter(r => (r.distance || 0) <= maxMiles)
     }
   }
 
   return list
 })
 
-// Auto-select first resource on mount or community change
-function syncSelectedResource() {
-  if (filteredResources.value.length > 0) {
-    selectedResource.value = filteredResources.value[0]
-  } else {
-    selectedResource.value = null
+// Latitude / Longitude Center
+const mapCenter = computed(() => {
+  if (customLat.value && customLng.value) {
+    return { lat: parseFloat(customLat.value), lng: parseFloat(customLng.value) }
+  }
+  if (isAnalyzed.value && patientData.value.lat && patientData.value.long) {
+    return { lat: patientData.value.lat, lng: patientData.value.long }
+  }
+  return { lat: activeCommunity.value.centerLat, lng: activeCommunity.value.centerLng }
+})
+
+// MapLibre Map Logic
+let mapInstance = null
+let mapMarkers = []
+let homeMarker = null
+
+function initMapLibre() {
+  const container = document.getElementById('maplibre-resources-map')
+  if (!container) return
+
+  if (mapInstance) {
+    mapInstance.remove()
+    mapInstance = null
+  }
+
+  const { lat, lng } = mapCenter.value
+
+  try {
+    mapInstance = new maplibregl.Map({
+      container: 'maplibre-resources-map',
+      style: isDarkMap.value ? mapStyles.dark : mapStyles.light,
+      center: [lng, lat],
+      zoom: 12.5,
+      pitch: 0,
+      attributionControl: false
+    })
+
+    mapInstance.on('load', () => {
+      mapInstance.resize()
+      renderMapElements()
+    })
+
+    window.addEventListener('resize', handleMapResize)
+  } catch (err) {
+    console.error("MapLibre Initialization Error:", err)
   }
 }
 
-function selectCommunity(id) {
-  selectedId.value = id
-  if (!isAnalyzed.value) {
-    const lat = centerLatForCounty(id)
-    const lon = centerLngForCounty(id)
-    fetchScrapedResources(lat, lon)
-  } else {
-    syncSelectedResource()
+function handleMapResize() {
+  if (mapInstance) {
+    mapInstance.resize()
   }
 }
 
-function selectCategory(cat) {
-  activeCategoryFilter.value = cat
-  syncSelectedResource()
+function toggleMapTheme() {
+  isDarkMap.value = !isDarkMap.value
+  if (mapInstance) {
+    mapInstance.setStyle(isDarkMap.value ? mapStyles.dark : mapStyles.light)
+    mapInstance.once('style.load', () => {
+      mapInstance.resize()
+      renderMapElements()
+      if (activeRouteInfo.value) {
+        showDirections(activeRouteInfo.value.res)
+      }
+    })
+  }
+}
+
+function renderMapElements() {
+  if (!mapInstance) return
+
+  // Clear existing markers
+  mapMarkers.forEach(m => m.remove())
+  mapMarkers = []
+  if (homeMarker) {
+    homeMarker.remove()
+    homeMarker = null
+  }
+
+  const { lat, lng } = mapCenter.value
+
+  // Create Patient/User Residence Pulse Marker
+  const homeEl = document.createElement('div')
+  homeEl.className = 'caremap-patient-marker'
+  homeEl.innerHTML = `
+    <div class="radar-ping"></div>
+    <div class="core-dot"></div>
+  `
+
+  const homePopup = new maplibregl.Popup({ offset: 25, closeButton: false }).setHTML(`
+    <div class="caremap-popup-card patient-popup">
+      <div class="popup-badge blue">Search Epicenter</div>
+      <h4 class="popup-title">${isAnalyzed.value ? patientData.value.name + ' (Patient Residence)' : (customLocationName.value || activeCommunity.value.cityName)}</h4>
+      <p class="popup-coord">${lat.toFixed(4)}, ${lng.toFixed(4)}</p>
+    </div>
+  `)
+
+  homeMarker = new maplibregl.Marker({ element: homeEl })
+    .setLngLat([lng, lat])
+    .setPopup(homePopup)
+    .addTo(mapInstance)
+
+  // Render Resource Pins
+  filteredResources.value.forEach(res => {
+    let rLat = res.lat
+    let rLon = res.lon
+
+    if (!rLat || !rLon) {
+      rLat = lat + (Math.random() - 0.5) * 0.04
+      rLon = lng + (Math.random() - 0.5) * 0.04
+    }
+
+    const pinEl = document.createElement('div')
+    const isSelected = selectedResource.value && selectedResource.value.id === res.id
+    const isCampaign = res.isCampaign || res.category === 'campaign'
+
+    pinEl.className = `caremap-resource-pin ${res.category} ${isSelected ? 'selected' : ''} ${isCampaign ? 'campaign-pulse' : ''}`
+    
+    pinEl.innerHTML = `
+      <div class="pin-inner">
+        <span class="pin-dot"></span>
+      </div>
+    `
+
+    const colorHex = res.category === 'campaign' ? '#2563eb' : res.category === 'food' ? '#d97706' : res.category === 'health' ? '#059669' : res.category === 'mental' ? '#7c3aed' : res.category === 'transit' ? '#2563eb' : '#db2777'
+    
+    const popupContent = `
+      <div class="caremap-popup-card">
+        <div class="popup-header" style="border-top: 3px solid ${colorHex};">
+          <span class="category-badge ${res.category}">${res.categoryLabel || res.category}</span>
+          <span class="distance-badge">${res.distance ? res.distance + ' mi' : 'Near'}</span>
+        </div>
+        <h4 class="popup-title">${res.name}</h4>
+        <p class="popup-address">📍 ${res.address || 'Address on file'}</p>
+        <p class="popup-hours">⏰ ${res.hoursText || 'Call for hours'}</p>
+        <div class="popup-actions">
+          <a href="${res.website ? (res.website.startsWith('http') ? res.website : 'https://' + res.website) : ('https://www.google.com/search?q=' + encodeURIComponent(res.name + ' ' + (res.address || '')))}" target="_blank" class="popup-btn call-btn">🌐 Website</a>
+          <button class="popup-btn maps-btn" onclick="window.careMapDirectRoute('${res.id}')">🛣️ Directions</button>
+        </div>
+      </div>
+    `
+
+    const popup = new maplibregl.Popup({ offset: 20, closeButton: true }).setHTML(popupContent)
+
+    const marker = new maplibregl.Marker({ element: pinEl })
+      .setLngLat([rLon, rLat])
+      .setPopup(popup)
+      .addTo(mapInstance)
+
+    pinEl.addEventListener('click', () => {
+      selectedResource.value = res
+      if (window.innerWidth <= 768) {
+        mobileTab.value = 'map'
+      }
+      mapInstance.flyTo({
+        center: [rLon, rLat],
+        zoom: 14.5,
+        speed: 1.2
+      })
+    })
+
+    mapMarkers.push(marker)
+  })
+}
+
+// Draw Directions & Route Line directly ON THE MAP
+async function showDirections(res) {
+  if (!mapInstance) return
+  selectedResource.value = res
+
+  if (window.innerWidth <= 768) {
+    mobileTab.value = 'map'
+    nextTick(() => {
+      if (mapInstance) mapInstance.resize()
+    })
+  }
+
+  const { lat: oLat, lng: oLng } = mapCenter.value
+  let dLat = res.lat
+  let dLng = res.lon
+
+  if (!dLat || !dLng) {
+    dLat = oLat + (Math.random() - 0.5) * 0.04
+    dLng = oLng + (Math.random() - 0.5) * 0.04
+  }
+
+  isRoutingLoading.value = true
+
+  try {
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${oLng},${oLat};${dLng},${dLat}?overview=full&geometries=geojson`
+    const resp = await fetch(osrmUrl)
+    let routeGeoJSON = null
+    let distMiles = res.distance || 0
+    let durationMins = Math.round(distMiles * 2.2) || 5
+
+    if (resp.ok) {
+      const routeData = await resp.json()
+      if (routeData.routes && routeData.routes.length > 0) {
+        const route = routeData.routes[0]
+        routeGeoJSON = route.geometry
+        distMiles = (route.distance / 1609.34).toFixed(1)
+        durationMins = Math.round(route.duration / 60)
+      }
+    }
+
+    if (!routeGeoJSON) {
+      const midLng = (oLng + dLng) / 2 + 0.003
+      const midLat = (oLat + dLat) / 2 - 0.003
+      routeGeoJSON = {
+        type: 'LineString',
+        coordinates: [
+          [oLng, oLat],
+          [midLng, midLat],
+          [dLng, dLat]
+        ]
+      }
+    }
+
+    activeRouteInfo.value = {
+      resourceName: res.name,
+      distanceText: `${distMiles} mi`,
+      durationText: `~${durationMins} mins drive`,
+      res: res
+    }
+
+    drawRouteLayer(routeGeoJSON)
+
+    const bounds = new maplibregl.LngLatBounds()
+      .extend([oLng, oLat])
+      .extend([dLng, dLat])
+
+    mapInstance.fitBounds(bounds, {
+      padding: { top: 120, bottom: 100, left: 100, right: 100 },
+      maxZoom: 15,
+      speed: 1.2
+    })
+
+    triggerToast(`Drawing navigation route to ${res.name}`)
+  } catch (err) {
+    console.error("Routing error:", err)
+    const fallbackGeoJSON = {
+      type: 'LineString',
+      coordinates: [[oLng, oLat], [dLng, dLat]]
+    }
+    drawRouteLayer(fallbackGeoJSON)
+    activeRouteInfo.value = {
+      resourceName: res.name,
+      distanceText: `${res.distance || 'Direct'} mi`,
+      durationText: 'Estimated route',
+      res: res
+    }
+    triggerToast(`Route displayed to ${res.name}`)
+  } finally {
+    isRoutingLoading.value = false
+  }
+}
+
+function drawRouteLayer(geojson) {
+  if (!mapInstance) return
+
+  if (mapInstance.getLayer('route-line-core')) mapInstance.removeLayer('route-line-core')
+  if (mapInstance.getLayer('route-line-casing')) mapInstance.removeLayer('route-line-casing')
+  if (mapInstance.getSource('route-source')) mapInstance.removeSource('route-source')
+
+  mapInstance.addSource('route-source', {
+    type: 'geojson',
+    data: {
+      type: 'Feature',
+      properties: {},
+      geometry: geojson
+    }
+  })
+
+  mapInstance.addLayer({
+    id: 'route-line-casing',
+    type: 'line',
+    source: 'route-source',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': '#1d4ed8',
+      'line-width': 8,
+      'line-opacity': 0.7
+    }
+  })
+
+  mapInstance.addLayer({
+    id: 'route-line-core',
+    type: 'line',
+    source: 'route-source',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': '#3b82f6',
+      'line-width': 5
+    }
+  })
+}
+
+function clearRoute() {
+  activeRouteInfo.value = null
+  if (mapInstance) {
+    if (mapInstance.getLayer('route-line-core')) mapInstance.removeLayer('route-line-core')
+    if (mapInstance.getLayer('route-line-casing')) mapInstance.removeLayer('route-line-casing')
+    if (mapInstance.getSource('route-source')) mapInstance.removeSource('route-source')
+    flyToEpicenter()
+  }
 }
 
 function handleResourceClick(res) {
   selectedResource.value = res
-  if (map && res.lat && res.lon) {
-    map.setView([res.lat, res.lon], 14)
+  if (window.innerWidth <= 768) {
+    mobileTab.value = 'map'
+    nextTick(() => {
+      if (mapInstance) mapInstance.resize()
+    })
+  }
+  if (mapInstance && res.lat && res.lon) {
+    mapInstance.flyTo({
+      center: [res.lon, res.lat],
+      zoom: 14.5,
+      speed: 1.2
+    })
   }
 }
 
-function handleLocationFilterChange(e) {
-  const val = e.target.value
-  if (val.includes('Cuyahoga')) selectCommunity('cuyahoga')
-  else if (val.includes('Wayne')) selectCommunity('wayne')
-  else if (val.includes('Marion')) selectCommunity('marion')
-  else if (val.includes('Franklin')) selectCommunity('franklin')
+function flyToEpicenter() {
+  if (mapInstance) {
+    const { lat, lng } = mapCenter.value
+    mapInstance.flyTo({
+      center: [lng, lat],
+      zoom: 13,
+      speed: 1.2
+    })
+  }
 }
 
-// Coordinate centers for legacy counties
-function centerLatForCounty(id) {
-  if (id === 'cuyahoga') return 41.4993
-  if (id === 'wayne') return 42.3314
-  if (id === 'marion') return 39.7684
-  if (id === 'franklin') return 39.9612
-  return 41.4993
+function zoomIn() {
+  if (mapInstance) mapInstance.zoomIn()
 }
 
-function centerLngForCounty(id) {
-  if (id === 'cuyahoga') return -81.6944
-  if (id === 'wayne') return -83.0458
-  if (id === 'marion') return -86.1581
-  if (id === 'franklin') return -82.9988
-  return -81.6944
+function zoomOut() {
+  if (mapInstance) mapInstance.zoomOut()
 }
 
-// Fetch resources using the python scraping endpoint
+const is3DView = ref(false)
+
+function toggle3DView() {
+  is3DView.value = !is3DView.value
+  if (!mapInstance) return
+
+  if (is3DView.value) {
+    mapInstance.easeTo({
+      pitch: 60,
+      bearing: -25,
+      duration: 1000
+    })
+    triggerToast('3D Perspective View Enabled')
+  } else {
+    mapInstance.easeTo({
+      pitch: 0,
+      bearing: 0,
+      duration: 1000
+    })
+    triggerToast('2D Flat View Enabled')
+  }
+}
+
+function resetCompass() {
+  if (mapInstance) {
+    mapInstance.resetNorthPitch()
+    is3DView.value = false
+  }
+}
+
+// Custom Coordinate Launcher
+function applyCustomCoordinates() {
+  if (inputLat.value && inputLng.value) {
+    customLat.value = parseFloat(inputLat.value)
+    customLng.value = parseFloat(inputLng.value)
+    customLocationName.value = `Custom Location (${customLat.value.toFixed(2)}, ${customLng.value.toFixed(2)})`
+    isCoordModalOpen.value = false
+    clearRoute()
+    triggerToast('Updated map center coordinates')
+    
+    if (mapInstance) {
+      mapInstance.flyTo({
+        center: [customLng.value, customLat.value],
+        zoom: 13
+      })
+      renderMapElements()
+    }
+  }
+}
+
+// Fetch resources using the python backend scraping endpoint
 async function fetchScrapedResources(lat, lon) {
   isLoadingScrape.value = true
   try {
     const res = await fetch(`${MAIN_BACKEND_URL}/api/patients/scrape-resources?lat=${lat}&lon=${lon}`)
     if (res.ok) {
       const data = await res.json()
-      scrapedResources.value = data.resources
-      syncSelectedResource()
-      plotMarkers()
+      scrapedResources.value = data.resources || []
+      if (filteredResources.value.length > 0) {
+        selectedResource.value = filteredResources.value[0]
+      }
+      renderMapElements()
     }
   } catch (err) {
     console.error("Error fetching scraped resources:", err)
@@ -554,1690 +1053,1459 @@ async function fetchScrapedResources(lat, lon) {
   }
 }
 
-// Get Color class for Category
-function getCategoryColor(cat) {
-  switch(cat) {
-    case 'food': return 'orange'
-    case 'health':
-    case 'clinic': return 'green'
-    case 'mental':
-    case 'gym': return 'purple'
-    case 'transit':
-    case 'park': return 'blue'
-    case 'housing': return 'pink'
-    case 'social': return 'rose'
-    case 'pharmacy': return 'teal'
-    default: return 'grey'
-  }
-}
-
-function getCategoryIcon(cat) {
-  switch(cat) {
-    case 'food': return 'pin'
-    case 'health':
-    case 'clinic': return 'pulse'
-    case 'mental':
-    case 'gym': return 'heart'
-    case 'transit':
-    case 'park': return 'home'
-    case 'housing': return 'home'
-    case 'social': return 'users'
-    default: return 'puzzle'
-  }
-}
-
-function getCategoryImgSrc(cat) {
-  switch(cat) {
-    case 'all': return '/assets/infinity.png'
-    case 'food': return '/assets/fork-and-knife.png'
-    case 'health':
-    case 'clinic': return '/assets/healthcare.png'
-    case 'mental':
-    case 'gym': return '/assets/dumbbell.png'
-    case 'park': return '/assets/park.png'
-    default: return null
-  }
-}
-
-function openResourceWebsite(website) {
-  if (!website) return
-  const url = website.startsWith('http') ? website : 'https://' + website
-  window.open(url, '_blank')
-}
-
-// Leaflet Map logic
-let map = null
-let markerGroup = null
-
-function initMap() {
-  const container = document.getElementById('leaflet-resources-map')
-  if (!container) return
-
-  if (map) {
-    map.remove()
-  }
-
-  const centerLat = isAnalyzed.value ? (patientData.value.lat || 41.4993) : centerLatForCounty(selectedId.value)
-  const centerLng = isAnalyzed.value ? (patientData.value.long || -81.6944) : centerLngForCounty(selectedId.value)
-
-  map = L.map('leaflet-resources-map', {
-    zoomControl: true,
-    attributionControl: false
-  }).setView([centerLat, centerLng], 13)
-
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19
-  }).addTo(map)
-
-  markerGroup = L.layerGroup().addTo(map)
-  plotMarkers()
-}
-
-function plotMarkers() {
-  if (!map || !markerGroup) return
-  markerGroup.clearLayers()
-
-  const centerLat = isAnalyzed.value ? (patientData.value.lat || 41.4993) : centerLatForCounty(selectedId.value)
-  const centerLng = isAnalyzed.value ? (patientData.value.long || -81.6944) : centerLngForCounty(selectedId.value)
-
-  // Standard marker for patient home/center point
-  const homeIcon = L.divIcon({
-    html: `<div class="home-marker-ping"><div class="ping-circle"></div><div class="core-circle"></div></div>`,
-    className: 'custom-home-icon',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12]
-  })
-
-  L.marker([centerLat, centerLng], { icon: homeIcon })
-    .bindPopup(`<b>${isAnalyzed.value ? patientData.value.name + ' (Patient Residence)' : 'Center Location'}</b>`)
-    .addTo(markerGroup)
-
-  // Plot resources
-  filteredResources.value.forEach(res => {
-    let resLat = res.lat
-    let resLon = res.lon
-
-    if (!resLat || !resLon) {
-      // Offset slightly for mock resources
-      resLat = centerLat + ((res.mapPos?.y || 50) - 50) * 0.0005
-      resLon = centerLng + ((res.mapPos?.x || 50) - 50) * 0.0005
+function selectCommunity(id) {
+  selectedId.value = id
+  customLat.value = null
+  customLng.value = null
+  clearRoute()
+  const comm = resourcesData[id]
+  if (comm) {
+    fetchScrapedResources(comm.centerLat, comm.centerLng)
+    if (mapInstance) {
+      mapInstance.flyTo({
+        center: [comm.centerLng, comm.centerLat],
+        zoom: 12.5
+      })
     }
-
-    const color = getCategoryColor(res.category)
-    const colorHex = color === 'orange' ? '#f59e0b' : color === 'green' ? '#10b981' : color === 'purple' ? '#8b5cf6' : color === 'blue' ? '#3b82f6' : color === 'pink' ? '#ec4899' : '#f43f5e'
-
-    const pinIcon = L.divIcon({
-      html: `<div style="background-color: ${colorHex}; border: 2px solid white; width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-      className: 'custom-resource-pin',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    })
-
-    const marker = L.marker([resLat, resLon], { icon: pinIcon })
-      .bindPopup(`<b>${res.name}</b><br>${res.categoryLabel}<br>${res.address}`)
-      .addTo(markerGroup)
-
-    marker.on('click', () => {
-      selectedResource.value = res
-    })
-  })
-
-  // Ensure Leaflet updates container layout size and centers perfectly
-  setTimeout(() => {
-    if (map) {
-      map.invalidateSize()
-      map.setView([centerLat, centerLng], 13)
-    }
-  }, 100)
+  }
 }
 
 // Watchers
 watch(filteredResources, () => {
-  plotMarkers()
-})
-
-watch(isAnalyzed, (newVal) => {
-  if (newVal) {
-    fetchScrapedResources(patientData.value.lat, patientData.value.long)
-  }
+  renderMapElements()
 })
 
 watch(selectedId, () => {
-  const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
-  const lon = isAnalyzed.value ? patientData.value.long : centerLngForCounty(selectedId.value)
-  fetchScrapedResources(lat, lon)
+  renderMapElements()
 })
 
-// Initialize resources data and map
 onMounted(() => {
-  const lat = isAnalyzed.value ? patientData.value.lat : centerLatForCounty(selectedId.value)
-  const lon = isAnalyzed.value ? patientData.value.long : centerLngForCounty(selectedId.value)
-  fetchScrapedResources(lat, lon)
+  window.careMapDirectRoute = (resId) => {
+    const matched = filteredResources.value.find(r => r.id === resId)
+    if (matched) {
+      showDirections(matched)
+    }
+  }
 
-  document.addEventListener('click', closeCategoryDropdown)
+  const { lat, lng } = mapCenter.value
+  fetchScrapedResources(lat, lng)
 
-  setTimeout(() => {
-    initMap()
-  }, 200)
+  nextTick(() => {
+    setTimeout(() => {
+      initMapLibre()
+    }, 150)
+  })
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeCategoryDropdown)
-  if (map) {
-    map.remove()
+  delete window.careMapDirectRoute
+  window.removeEventListener('resize', handleMapResize)
+  if (mapInstance) {
+    mapInstance.remove()
   }
 })
 </script>
 
 <template>
-  <div class="community-resources-page">
+  <div class="caremap-resources-page light-theme">
     
-    <!-- Toast notification message -->
+    <!-- Toast Popup Notification -->
     <Transition name="fade">
       <div v-if="showToast" class="toast-popup">
-        <IconBase name="shield" :size="14" />
+        <IconBase name="shield" :size="16" />
         <span>{{ toastMsg }}</span>
       </div>
     </Transition>
 
+    <!-- Custom Coordinates Modal -->
+    <div v-if="isCoordModalOpen" class="modal-overlay" @click.self="isCoordModalOpen = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Set Custom Map Location</h3>
+          <button class="close-btn" @click="isCoordModalOpen = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">Enter latitude and longitude coordinates to center CareMap anywhere in the world.</p>
+          <div class="input-group">
+            <label>Latitude</label>
+            <input v-model="inputLat" type="number" step="0.0001" placeholder="e.g. 41.4993" />
+          </div>
+          <div class="input-group">
+            <label>Longitude</label>
+            <input v-model="inputLng" type="number" step="0.0001" placeholder="e.g. -81.6944" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="isCoordModalOpen = false">Cancel</button>
+          <button class="btn-primary" @click="applyCustomCoordinates">Apply Location</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile View Tab Switcher Bar (< 768px) -->
+    <div class="mobile-view-toggle">
+      <button 
+        class="mobile-tab" 
+        :class="{ active: mobileTab === 'list' }" 
+        @click="mobileTab = 'list'"
+      >
+        📋 List View ({{ filteredResources.length }})
+      </button>
+      <button 
+        class="mobile-tab" 
+        :class="{ active: mobileTab === 'map' }" 
+        @click="mobileTab = 'map'"
+      >
+        🗺️ Map View
+      </button>
+    </div>
+
+    <!-- Main Container -->
     <div class="main-layout">
-      <!-- 1. Left/Center Main Panel -->
-      <div class="content-body">
+      
+      <!-- Left Panel: Controls, Categories & Resource List -->
+      <div class="sidebar-panel" :class="{ 'mobile-hidden': mobileTab !== 'list' }">
         
         <!-- Header -->
-        <header class="page-header">
-          <div>
+        <div class="header-section">
+          <div class="title-row">
+            <div class="brand-badge">
+              <span class="pulse-dot"></span>
+              CareMap Live
+            </div>
             <h1>Community Resources</h1>
-            <p class="description">Discover and connect members with local resources that support health and well-being.</p>
           </div>
-        </header>
+          <p class="subtitle">Geospatial discovery of health clinics, food access, transit, and live interventions.</p>
+        </div>
 
-        <!-- Filters Bar Panel -->
-        <section class="filters-panel card">
-          <div class="filter-item search-col" style="flex: 1;">
-            <span class="lbl">Search resources</span>
-            <div class="search-input-wrapper">
-              <IconBase name="search" :size="14" class="search-icon" />
-              <input 
-                v-model="searchQuery" 
-                type="text" 
-                placeholder="Search by name or service..." 
-                class="search-input"
-              />
-            </div>
-          </div>
-
-          <div class="filter-item radius-col custom-radius-dropdown">
-            <span class="lbl">Radius</span>
-            <div class="custom-radius-trigger" style="position: relative;" @click="isRadiusDropdownOpen = !isRadiusDropdownOpen">
-              <span class="selected-val font-bold">{{ radiusFilter }}</span>
-              <span class="chevron-icon" :class="{ open: isRadiusDropdownOpen }">
-                <IconBase name="chevron-down" :size="12" />
+        <!-- Location & Preset Region Selector Dropdown -->
+        <div class="region-selector-bar">
+          <span class="region-label">Region:</span>
+          <div class="region-dropdown-wrapper">
+            <button class="region-trigger" @click="isRegionDropdownOpen = !isRegionDropdownOpen">
+              <span class="region-trigger-text">
+                📍 <strong>{{ selectedRegionLabel }}</strong>
               </span>
-
-              <!-- Custom Menu Popover -->
-              <transition name="menu-fade">
-                <ul v-if="isRadiusDropdownOpen" class="custom-radius-menu" @click.stop>
-                  <li 
-                    v-for="opt in radiusOptionsList" 
-                    :key="opt"
-                    class="radius-menu-item"
-                    :class="{ active: radiusFilter === opt }"
-                    @click="selectRadius(opt)"
-                  >
-                    <span class="item-text font-semibold">{{ opt }}</span>
-                    <span v-if="radiusFilter === opt" class="active-check">✓</span>
-                  </li>
-                </ul>
-              </transition>
-            </div>
-
-            <!-- Backdrop -->
-            <div v-if="isRadiusDropdownOpen" class="dropdown-backdrop" @click="isRadiusDropdownOpen = false"></div>
-          </div>
-        </section>
-
-        <!-- Segmented View Toggle Control & List Header -->
-        <div class="results-header-row" style="margin-top: 18px; margin-bottom: 12px;">
-          <h3 class="results-title">Nearby Resources <span class="count">({{ filteredResources.length }})</span></h3>
-          
-          <!-- Category Dropdown Button -->
-          <div class="category-dropdown-wrapper">
-            <button class="filter-dropdown-btn" @click.stop="isCategoryDropdownOpen = !isCategoryDropdownOpen">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter-icon"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-              <span class="font-bold">{{ activeCategoryLabel }}</span>
-              <span class="count-badge">{{ getCategoryCount(activeCategoryFilter) }}</span>
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon"><polyline points="6 9 12 15 18 9"/></svg>
+              <IconBase name="chevron-down" :size="14" />
             </button>
-            
-            <transition name="dropdown-fade">
-              <div class="filter-dropdown-menu" v-if="isCategoryDropdownOpen">
-                <button 
-                  v-for="chip in chips"
-                  :key="chip.id"
-                  class="dropdown-item category-dropdown-item"
-                  :class="{ active: activeCategoryFilter === chip.id }"
-                  @click="selectCategory(chip.id); isCategoryDropdownOpen = false"
-                >
-                  <span class="chip-icon-box mini" :class="chip.colorClass">
-                    <img v-if="chip.imgSrc" :src="chip.imgSrc" style="width: 16px; height: 16px; object-fit: contain;" />
-                    <IconBase v-else :name="chip.icon" :size="11" />
-                  </span>
-                  <span class="lbl-text">{{ chip.label }}</span>
-                  <span class="count-val">{{ getCategoryCount(chip.id) }}</span>
-                </button>
+            <ul v-if="isRegionDropdownOpen" class="region-menu">
+              <!-- County Search Box inside Dropdown -->
+              <div class="county-search-box">
+                <IconBase name="search" :size="13" class="c-search-icon" />
+                <input 
+                  v-model="countySearchQuery" 
+                  type="text" 
+                  placeholder="Search county name..." 
+                  @click.stop
+                />
               </div>
-            </transition>
+
+              <!-- Scrollable County List -->
+              <div class="county-scroll-list">
+                <li 
+                  v-for="reg in filteredRegionOptions" 
+                  :key="reg.id"
+                  :class="{ active: selectedId === reg.id && !customLat }"
+                  @click="selectRegion(reg)"
+                >
+                  <div class="region-item-row">
+                    <span class="region-item-name">{{ reg.name }}</span>
+                    <span class="region-item-county" v-if="reg.city">{{ reg.city }}</span>
+                  </div>
+                </li>
+                <li v-if="filteredRegionOptions.length === 0" class="no-county-found">
+                  No county found matching "{{ countySearchQuery }}"
+                </li>
+              </div>
+
+              <!-- Custom Coordinates Launcher Option -->
+              <li class="custom-coord-option" @click="openCustomModalFromDropdown">
+                <IconBase name="locate" :size="13" />
+                <span>Custom Lat / Lng Coordinates...</span>
+              </li>
+            </ul>
           </div>
         </div>
 
-        <!-- Collapsible Interactive Map Pane -->
-        <Transition name="slide-up">
-          <section v-if="viewMode === 'map'" class="map-section card">
-            <div class="map-canvas-container" style="position: relative; height: auto;">
-              <!-- Leaflet Map Container -->
-              <div id="leaflet-resources-map" style="width: 100%; height: 500px; border-radius: 8px; z-index: 1;"></div>
-            </div>
+        <!-- Search Bar & Radius Filter -->
+        <div class="search-filter-card">
+          <div class="search-input-box">
+            <IconBase name="search" :size="16" class="search-icon" />
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              placeholder="Search resources, services, or locations..." 
+            />
+            <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''">&times;</button>
+          </div>
 
-            <!-- Map Categories Legends Row -->
-            <div class="map-legends-row">
-              <span v-for="chip in chips.filter(c => c.id !== 'all')" :key="chip.id" class="legend-chip">
-                <span class="chip-color" :class="chip.colorClass"></span> {{ chip.label }}
-              </span>
-            </div>
-          </section>
-        </Transition>
+          <div class="radius-dropdown-wrapper">
+            <button class="radius-trigger" @click="isRadiusDropdownOpen = !isRadiusDropdownOpen">
+              <span>Radius: <strong>{{ radiusFilter }}</strong></span>
+              <IconBase name="chevron-down" :size="14" />
+            </button>
+            <ul v-if="isRadiusDropdownOpen" class="radius-menu">
+              <li 
+                v-for="opt in radiusOptionsList" 
+                :key="opt"
+                :class="{ active: radiusFilter === opt }"
+                @click="selectRadius(opt)"
+              >
+                {{ opt }}
+              </li>
+            </ul>
+          </div>
+        </div>
 
-        <!-- Resources Results List -->
-        <section class="resources-list-container">
+        <!-- Category Filter Pills -->
+        <div class="categories-scroll-wrapper">
+          <div 
+            v-for="cat in categories" 
+            :key="cat.id"
+            class="category-pill"
+            :class="[cat.id, { active: activeCategoryFilter === cat.id }, { special: cat.isSpecial }]"
+            @click="activeCategoryFilter = cat.id"
+          >
+            <IconBase :name="cat.icon" :size="14" />
+            <span>{{ cat.label }}</span>
+            <span class="count-badge">{{ getCategoryCount(cat.id) }}</span>
+          </div>
+        </div>
+
+        <!-- Resources List Section -->
+        <div class="resources-list-container">
+          <div class="list-header">
+            <h3>Matching Resources ({{ filteredResources.length }})</h3>
+            <span v-if="isLoadingScrape" class="loading-tag">Updating live data...</span>
+          </div>
+
+          <div v-if="filteredResources.length === 0" class="empty-state">
+            <IconBase name="search" :size="32" />
+            <p>No community resources found matching your search or radius criteria.</p>
+          </div>
+
           <div 
             v-for="res in filteredResources" 
             :key="res.id"
-            class="resource-list-item card"
-            :class="{ selected: res.id === selectedResource?.id }"
+            class="resource-card"
+            :class="{ active: selectedResource && selectedResource.id === res.id, campaign: res.isCampaign || res.category === 'campaign' }"
             @click="handleResourceClick(res)"
           >
-            <!-- Category Icon bubble -->
-            <div class="item-icon-col">
-              <span class="category-icon-bubble" :class="getCategoryColor(res.category)">
-                <img v-if="getCategoryImgSrc(res.category)" :src="getCategoryImgSrc(res.category)" style="width: 18px; height: 18px; object-fit: contain;" />
-                <IconBase v-else
-                  :name="getCategoryIcon(res.category)" 
-                  :size="15" 
-                />
+            <div class="card-top">
+              <span class="category-tag" :class="res.category">
+                {{ res.categoryLabel || res.category }}
               </span>
-            </div>
-
-            <!-- Resource Main details -->
-            <div class="item-details-col">
-              <div class="name-badge-row">
-                <h4 class="res-name font-bold">{{ res.name }}</h4>
-                <span v-if="res.verified" class="verified-badge">Verified</span>
+              <div class="card-actions">
+                <button 
+                  class="bookmark-btn" 
+                  :class="{ bookmarked: bookmarkedIds.has(res.id) }" 
+                  @click.stop="toggleBookmark(res.id)"
+                  title="Bookmark Resource"
+                >
+                  <IconBase name="heart" :size="14" />
+                </button>
+                <span class="distance-tag">{{ res.distance ? res.distance + ' mi' : 'Near' }}</span>
               </div>
-              <p class="res-sub-info font-semibold">
-                {{ res.categoryLabel }} &bull; {{ res.distance }} miles away
-              </p>
             </div>
 
-            <!-- Services Offered -->
-            <div class="item-services-col">
-              <span class="label-header font-bold">Services</span>
-              <p class="services-snippet">{{ res.services.slice(0, 3).join(', ') }}</p>
+            <h4 class="resource-name">{{ res.name }}</h4>
+
+            <p class="resource-address">
+              <IconBase name="pin" :size="13" />
+              <span>{{ res.address }}</span>
+            </p>
+
+            <p class="resource-hours">
+              <IconBase name="calendar" :size="13" />
+              <span>{{ res.hoursText || 'Contact for operating hours' }}</span>
+            </p>
+
+            <div v-if="res.services && res.services.length > 0" class="service-tags">
+              <span v-for="(svc, idx) in res.services.slice(0, 3)" :key="idx" class="svc-tag">
+                {{ svc }}
+              </span>
+              <span v-if="res.services.length > 3" class="svc-more">+{{ res.services.length - 3 }} more</span>
             </div>
 
-            <!-- Hours and Eligibility -->
-            <div class="item-hours-col">
-              <span class="label-header font-bold">Hours</span>
-              <p class="hours-snippet">{{ res.hoursText }}</p>
-            </div>
-
-            <div class="item-eligibility-col">
-              <span class="label-header font-bold">Eligibility</span>
-              <p class="eligibility-snippet">{{ res.eligibility }}</p>
-            </div>
-
-            <!-- Bookmark / Quick actions -->
-            <div class="item-action-col" @click.stop="toggleBookmark(res.id)">
-              <button class="bookmark-btn" :class="{ bookmarked: bookmarkedIds.has(res.id) }">
-                <IconBase name="shield" :size="14" />
+            <div class="card-footer">
+              <a 
+                :href="res.website ? (res.website.startsWith('http') ? res.website : 'https://' + res.website) : ('https://www.google.com/search?q=' + encodeURIComponent(res.name + ' ' + (res.address || '')))" 
+                target="_blank"
+                class="card-btn call"
+                @click.stop
+              >
+                Website ↗
+              </a>
+              <button 
+                class="card-btn nav"
+                @click.stop="showDirections(res)"
+              >
+                Directions
               </button>
             </div>
           </div>
-
-          <div v-if="filteredResources.length === 0" class="empty-state-card card">
-            <IconBase name="alert" :size="24" class="empty-icon" />
-            <h4>No resources found matching search criteria.</h4>
-            <p>Try resetting the category filter or searching with different keywords.</p>
-          </div>
-        </section>
-
-        <!-- Pagination Bar -->
-        <footer class="pagination-bar">
-          <span class="showing-lbl">Showing 1-{{ filteredResources.length }} of {{ filteredResources.length }} resources</span>
-        </footer>
+        </div>
 
       </div>
 
-      <!-- 2. Right Detail Sidebar Panel (Selected Resource Details) -->
-      <aside class="resource-detail-rail">
-        <div v-if="selectedResource" class="detail-container">
-          
-          <!-- Back navigation & Close row -->
-          <div class="detail-header-row">
-            <button class="back-btn" @click="selectedResource = null">
-              <IconBase name="trend" :size="12" style="transform: rotate(180deg);" /> Back to results
-            </button>
-            <button class="close-btn" @click="selectedResource = null">&times;</button>
-          </div>
-
-          <!-- Main Info Header -->
-          <section class="detail-main-header">
-            <div class="header-banner-row">
-              <span class="detail-icon-bubble" :class="getCategoryColor(selectedResource.category)">
-                <img v-if="getCategoryImgSrc(selectedResource.category)" :src="getCategoryImgSrc(selectedResource.category)" style="width: 24px; height: 24px; object-fit: contain;" />
-                <IconBase v-else
-                  :name="getCategoryIcon(selectedResource.category)" 
-                  :size="20" 
-                />
-              </span>
-              <div class="title-col">
-                <div class="title-badge-row">
-                  <h3 class="detail-name font-bold">{{ selectedResource.name }}</h3>
-                  <span v-if="selectedResource.verified" class="verified-tag">Verified</span>
-                </div>
-                <p class="detail-sub-meta font-semibold">
-                  {{ selectedResource.categoryLabel }} &bull; {{ selectedResource.distance }} miles away
-                </p>
-                <div class="rating-row font-semibold">
-                  <span class="star-icon">&#9733;</span> {{ selectedResource.rating }} 
-                  <span class="reviews-count font-normal">({{ selectedResource.reviewsCount }})</span>
-                </div>
+      <!-- Right Panel: MapLibre Canvas with Floating Map Controls & Navigation Overlay -->
+      <div class="map-panel" :class="{ 'mobile-hidden': mobileTab !== 'map' }">
+        
+        <!-- On-Map Navigation Directions Banner Overlay -->
+        <Transition name="fade">
+          <div v-if="activeRouteInfo" class="caremap-route-banner">
+            <div class="route-info-col">
+              <div class="route-badge">🚘 Route Navigation Active</div>
+              <div class="route-dest-name">{{ activeRouteInfo.resourceName }}</div>
+              <div class="route-metrics">
+                <span>📍 {{ activeRouteInfo.distanceText }}</span>
+                <span>⏱️ {{ activeRouteInfo.durationText }}</span>
               </div>
             </div>
-          </section>
-
-          <!-- Core Call to Actions -->
-          <section class="action-buttons-box">
-            <button class="action-btn primary" @click="openResourceWebsite(selectedResource.website)" style="justify-content: center; width: 100%;">
-              <IconBase name="external" :size="13" style="margin-right: 6px;" /> Know More
-            </button>
-          </section>
-
-          <!-- Services Chips -->
-          <section class="services-chips-box">
-            <h4 class="sec-title font-bold">Services Offered</h4>
-            <div class="chips-list">
-              <span 
-                v-for="serv in selectedResource.services" 
-                :key="serv" 
-                class="service-tag font-semibold"
+            <div class="route-action-col">
+              <a 
+                :href="'https://www.google.com/maps/search/?api=1&query=' + (activeRouteInfo.res.lat || mapCenter.lat) + ',' + (activeRouteInfo.res.lon || mapCenter.lng)" 
+                target="_blank" 
+                class="route-btn gmaps"
               >
-                {{ serv }}
-              </span>
+                Google Maps ↗
+              </a>
+              <button class="route-btn clear" @click="clearRoute">
+                Clear Route &times;
+              </button>
             </div>
-          </section>
+          </div>
+        </Transition>
 
-          <!-- Detailed Fields (Address, Phone, Website, Hours) -->
-          <section class="fields-details-box">
-            <div class="field-item">
-              <span class="field-icon"><IconBase name="pin" :size="14" /></span>
-              <div class="field-content">
-                <span class="lbl font-bold">Address</span>
-                <p class="val">{{ selectedResource.address }}</p>
-              </div>
-            </div>
+        <!-- Map Canvas -->
+        <div id="maplibre-resources-map" class="map-container"></div>
 
-            <div class="field-item">
-              <span class="field-icon"><IconBase name="trend" :size="14" /></span>
-              <div class="field-content">
-                <span class="lbl font-bold">Phone</span>
-                <p class="val">{{ selectedResource.phone }}</p>
-              </div>
-            </div>
-
-            <div class="field-item">
-              <span class="field-icon"><IconBase name="shield" :size="14" /></span>
-              <div class="field-content">
-                <span class="lbl font-bold">Website</span>
-                <a :href="'https://' + selectedResource.website" target="_blank" class="val-link font-semibold">
-                  {{ selectedResource.website }}
-                  <span class="external-arrow">&nearr;</span>
-                </a>
-              </div>
-            </div>
-
-            <div class="field-item">
-              <span class="field-icon"><IconBase name="pulse" :size="14" /></span>
-              <div class="field-content">
-                <span class="lbl font-bold">Hours</span>
-                <ul class="hours-list">
-                  <li v-for="h in selectedResource.hoursList" :key="h.days">
-                    <span class="days font-semibold">{{ h.days }}:</span>
-                    <span class="time">{{ h.time }}</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          <!-- Eligibility Details -->
-          <section class="eligibility-box">
-            <h4 class="sec-title font-bold">Eligibility</h4>
-            <p class="eligibility-text">{{ selectedResource.eligibility }}</p>
-          </section>
-
-          <!-- About resource -->
-          <section class="about-box">
-            <h4 class="sec-title font-bold">About this resource</h4>
-            <p class="about-text">{{ selectedResource.about }}</p>
-          </section>
-
-          <!-- Why recommended Callout card -->
-          <section class="why-recommended-callout">
-            <span class="icon-bubble"><IconBase name="shield" :size="15" /></span>
-            <div class="callout-content">
-              <h5 class="callout-title font-bold">Why this resource is recommended</h5>
-              <p class="callout-desc">{{ selectedResource.whyRecommended }}</p>
-            </div>
-          </section>
-
+        <!-- Floating CareMap Controls Bar (Top Left Horizontal) -->
+        <div class="caremap-controls-bar">
+          <button class="map-control-btn" @click="zoomIn" title="Zoom In">+</button>
+          <button class="map-control-btn" @click="zoomOut" title="Zoom Out">&minus;</button>
+          <button class="map-control-btn" @click="resetCompass" title="Reset North">N</button>
+          <button 
+            class="map-control-btn view-3d-btn" 
+            :class="{ active: is3DView }" 
+            @click="toggle3DView" 
+            :title="is3DView ? 'Switch to 2D Flat View' : 'Switch to 3D Perspective View'"
+          >
+            <span v-if="is3DView" class="badge-3d active">2D</span>
+            <span v-else class="badge-3d">3D</span>
+          </button>
+          <button class="map-control-btn" @click="flyToEpicenter" title="Locate Center">
+            <IconBase name="locate" :size="16" />
+          </button>
+          <button class="map-control-btn theme-toggle" @click="toggleMapTheme" :title="isDarkMap ? 'Switch to Light Map Tiles' : 'Switch to Dark Map Tiles'">
+            <span v-if="isDarkMap">☀️</span>
+            <span v-else>🌙</span>
+          </button>
         </div>
 
-        <div v-else class="no-selection-state">
-          <IconBase name="pin" :size="32" class="placeholder-icon" />
-          <p class="placeholder-text font-semibold">Select a community resource from the list to view full contact details, eligibility criteria, and clinical recommendations.</p>
+        <!-- Floating Legend Pill (Top Right) -->
+        <div class="caremap-legend-pill">
+          <span class="legend-item"><span class="dot patient"></span> Residence Center</span>
+          <span class="legend-item"><span class="dot campaign"></span> Live Campaign</span>
+          <span class="legend-item"><span class="dot health"></span> Clinic</span>
+          <span class="legend-item"><span class="dot food"></span> Food</span>
         </div>
-      </aside>
+
+      </div>
+
     </div>
 
   </div>
 </template>
 
 <style scoped>
-.community-resources-page {
-  background: #f8fafc;
-  height: 100%;
+/* White / Light Theme Base */
+.caremap-resources-page.light-theme {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  height: calc(100vh - 64px);
+  min-height: 0;
+  background-color: #f8fafc;
+  color: #0f172a;
   overflow: hidden;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   position: relative;
 }
 
-/* Toast popup notification */
-.toast-popup {
-  position: absolute;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #1e293b;
-  color: #ffffff;
-  padding: 10px 18px;
-  border-radius: 8px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  display: flex;
-  align-items: center;
+/* Mobile View Toggle Bar (< 768px) */
+.mobile-view-toggle {
+  display: none;
+  width: 100%;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 12px;
   gap: 8px;
-  z-index: 1000;
-  font-size: 0.74rem;
-  font-weight: 600;
+  z-index: 50;
+}
+.mobile-tab {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  transition: all 0.2s;
+}
+.mobile-tab.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
 }
 
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -10px);
-}
-
-.main-layout {
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  height: 100%;
-}
-
-.content-body {
-  padding: 24px 32px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-}
-
-/* Header */
-.page-header {
+/* On-Map Navigation Banner */
+.caremap-route-banner {
+  position: absolute;
+  top: 72px;
+  left: 20px;
+  z-index: 40;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #2563eb;
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.2);
+  max-width: calc(100% - 40px);
+  animation: slideDown 0.3s ease;
 }
-
-.page-header h1 {
-  margin: 0 0 4px;
-  font-size: 1.6rem;
+@keyframes slideDown {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.route-badge {
+  font-size: 11px;
   font-weight: 800;
-  color: var(--text-primary);
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
-
-.page-header .description {
-  margin: 0;
-  font-size: 0.86rem;
-  color: var(--text-secondary);
+.route-dest-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 2px 0;
 }
-
-.header-actions {
+.route-metrics {
   display: flex;
   gap: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
 }
-
-.btn {
-  border-radius: var(--radius-md);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 8px 16px;
+.route-action-col {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.15s ease;
 }
-
-.btn.outlined {
-  background: #ffffff;
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-}
-
-.btn.outlined:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-}
-
-.btn.primary {
-  background: var(--brand);
-  color: #ffffff;
-}
-
-.btn.primary:hover {
-  background: var(--brand-dark);
-}
-
-/* Card */
-.card {
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: 16px;
-}
-
-/* Filters Panel */
-.filters-panel {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 18px;
-  flex-wrap: wrap;
-}
-
-.filter-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.filter-item.location-col { flex: 1.2; min-width: 140px; }
-.filter-item.search-col { flex: 2; min-width: 180px; }
-.filter-item.radius-col { flex: 0 0 160px; }
-.filter-item.category-col { flex: 1.2; min-width: 130px; }
-
-.filter-item .lbl {
-  font-size: 0.62rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-}
-
-.filter-select {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  background: #ffffff;
-  outline: none;
-  cursor: pointer;
-}
-
-/* Custom Radius Dropdown UI */
-.custom-radius-trigger {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 10px;
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.15s ease;
-}
-
-.custom-radius-trigger:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-}
-
-.selected-val {
-  font-size: 0.76rem;
-  color: var(--text-primary);
-}
-
-.chevron-icon {
-  color: #94a3b8;
-  transition: transform 0.2s ease;
-}
-
-.chevron-icon.open {
-  transform: rotate(180deg);
-}
-
-.dropdown-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 99;
-}
-
-.custom-radius-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
-  padding: 4px;
-  margin: 0;
-  list-style: none;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.radius-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.route-btn {
   padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.76rem;
-  color: var(--text-primary);
-  transition: background 0.15s ease;
-}
-
-.radius-menu-item:hover {
-  background: #f1f5f9;
-}
-
-.radius-menu-item.active {
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-weight: 700;
-}
-
-.radius-menu-item .active-check {
-  color: #2563eb;
-  font-weight: bold;
-}
-
-.menu-fade-enter-active,
-.menu-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.menu-fade-enter-from,
-.menu-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-
-.search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.search-icon {
-  position: absolute;
-  left: 10px;
-  color: #94a3b8;
-}
-
-.search-input {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px 5px 30px;
-  font-size: 0.76rem;
-  color: var(--text-primary);
-  background: #ffffff;
-  outline: none;
-  width: 100%;
-}
-
-.filters-btn {
-  background: #ffffff;
-  border: 1px solid var(--border);
-  padding: 6px 12px;
   border-radius: 8px;
-  font-size: 0.74rem;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-end;
-}
-
-/* Category Dropdown Filter Section */
-.category-filter-section {
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-}
-
-.category-dropdown-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.filter-dropdown-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #475569;
+  text-decoration: none;
   cursor: pointer;
-  transition: all 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
   white-space: nowrap;
 }
-
-.filter-dropdown-btn:hover {
-  border-color: #94a3b8;
-  background: #f8fafc;
-}
-
-.filter-icon,
-.chevron-icon {
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.count-badge {
+.route-btn.gmaps {
   background: #eff6ff;
   color: #2563eb;
-  padding: 2px 7px;
-  border-radius: 10px;
-  font-size: 0.68rem;
-  font-weight: 750;
-  margin-left: 2px;
+  border: 1px solid #bfdbfe;
+}
+.route-btn.clear {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecdd3;
+}
+.route-btn.clear:hover {
+  background: #dc2626;
+  color: white;
 }
 
-.filter-dropdown-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  z-index: 50;
-  min-width: 220px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.filter-dropdown-menu.left-align {
-  left: 0;
-  right: auto;
-}
-
-.dropdown-item {
-  border: none;
-  background: transparent;
-  text-align: left;
-  padding: 8px 12px;
-  font-size: 0.74rem;
-  font-weight: 500;
-  color: #475569;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
+/* Toast Popup */
+.toast-popup {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #bfdbfe;
+  backdrop-filter: blur(12px);
+  color: #1d4ed8;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.15);
+  font-weight: 600;
+  font-size: 13px;
 }
 
-.dropdown-item:hover {
-  background: #f1f5f9;
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-card {
+  width: 420px;
+  max-width: 90vw;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15);
   color: #0f172a;
 }
-
-.dropdown-item.active {
-  background: #eff6ff;
-  color: #2563eb;
-  font-weight: 600;
-}
-
-.category-dropdown-item .lbl-text {
-  flex-grow: 1;
-}
-
-.category-dropdown-item .count-val {
-  font-size: 0.68rem;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.category-dropdown-item.active .count-val {
-  color: #2563eb;
-}
-
-.chip-icon-box {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.chip-icon-box.mini {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-}
-
-.chip-icon-box.orange { background: #fff9db; color: #f59e0b; }
-.chip-icon-box.green { background: #e6fcf5; color: #10b981; }
-.chip-icon-box.purple { background: #f3f0ff; color: #8b5cf6; }
-.chip-icon-box.blue { background: #e7f5ff; color: #3b82f6; }
-.chip-icon-box.pink { background: #fdf2f8; color: #ec4899; }
-.chip-icon-box.rose { background: #fff1f2; color: #f43f5e; }
-.chip-icon-box.grey { background: #f1f5f9; color: #64748b; }
-
-/* Results header segmented view toggle control */
-.results-header-row {
+.modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
+  margin-bottom: 12px;
 }
-
-.results-title {
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 700;
   margin: 0;
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: var(--text-primary);
+  color: #0f172a;
 }
-
-.results-title .count {
-  font-weight: 500;
-  color: var(--text-secondary);
+.close-btn {
+  font-size: 24px;
+  color: #64748b;
 }
-
-.segmented-control {
-  display: flex;
-  background: #e2e8f0;
-  border-radius: 8px;
-  padding: 2.5px;
+.modal-desc {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 16px;
 }
-
-.segmented-control button {
-  border: none;
-  background: transparent;
-  padding: 4px 10px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.segmented-control button.active {
-  background: #ffffff;
-  color: var(--brand);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-/* Collapsible Map Section */
-.map-section {
-  padding: 12px;
+.input-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.input-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.input-group input {
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #0f172a;
+  font-size: 14px;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+.btn-secondary {
+  padding: 8px 16px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.btn-primary {
+  padding: 8px 16px;
+  background: #2563eb;
+  color: white;
+  border-radius: 8px;
+  font-weight: 600;
 }
 
-.slide-up-enter-active, .slide-up-leave-active {
-  transition: all 0.25s ease-out;
-}
-.slide-up-enter-from, .slide-up-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
-.map-canvas-container {
-  height: 160px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: #fafbfe;
-  position: relative;
+/* Layout */
+.main-layout {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
-.map-svg {
-  width: 100%;
+/* Sidebar Panel */
+.sidebar-panel {
+  width: 400px;
+  min-width: 320px;
+  max-width: 450px;
   height: 100%;
-  display: block;
-}
-
-.map-city-label {
-  font-size: 8px;
-  fill: #1e293b;
-}
-
-.map-suburb-text {
-  font-size: 5px;
-  fill: #94a3b8;
-  font-weight: 700;
-}
-
-.pulse-ring {
-  animation: pulse-effect 1.8s infinite ease-in-out;
-  transform-origin: center;
-}
-
-@keyframes pulse-effect {
-  0% { r: 6.5; opacity: 0.8; }
-  100% { r: 16; opacity: 0; }
-}
-
-.map-pin-group {
-  cursor: pointer;
-}
-
-.map-pin {
-  transition: transform 0.15s ease, fill 0.15s ease;
-}
-
-.map-pin-group:hover .map-pin {
-  transform: scale(1.35);
-  fill: #1e3a8a;
-}
-
-.map-controls-box {
-  position: absolute;
-  top: 10px;
-  right: 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.ctrl-btn {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
   background: #ffffff;
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  cursor: pointer;
+  border-right: 1px solid #e2e8f0;
+  overflow: hidden;
+  transition: width 0.3s ease;
 }
 
-.ctrl-btn:hover {
-  background: #f8fafc;
-  color: var(--text-primary);
+.header-section {
+  padding: 18px 20px 12px 20px;
 }
-
-.map-legends-row {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  flex-wrap: wrap;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 8px;
-}
-
-.legend-chip {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.chip-color {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.chip-color.orange { background: #f59e0b; }
-.chip-color.green { background: #10b981; }
-.chip-color.purple { background: #8b5cf6; }
-.chip-color.blue { background: #3b82f6; }
-.chip-color.pink { background: #ec4899; }
-.chip-color.rose { background: #f43f5e; }
-
-/* Resources List */
-.resources-list-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.resource-list-item {
-  display: grid;
-  grid-template-columns: 36px 1.4fr 1.2fr 1fr 1fr 24px;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.resource-list-item:hover {
-  border-color: #cbd5e1;
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
-}
-
-.resource-list-item.selected {
-  border-color: var(--brand);
-  background: #f0f4ff;
-  box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.08);
-}
-
-.category-icon-bubble {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.category-icon-bubble.orange { background: #fffbeb; color: #d97706; }
-.category-icon-bubble.green { background: #ecfdf5; color: #059669; }
-.category-icon-bubble.purple { background: #f5f3ff; color: #7c3aed; }
-.category-icon-bubble.blue { background: #eff6ff; color: #2563eb; }
-.category-icon-bubble.pink { background: #fdf2f8; color: #db2777; }
-.category-icon-bubble.rose { background: #fff1f2; color: #e11d48; }
-
-.name-badge-row {
-  display: flex;
+.brand-badge {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.res-name {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--text-primary);
-}
-
-.verified-badge {
-  font-size: 0.54rem;
-  background: #d1fae5;
-  color: #065f46;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 4px 10px;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 20px;
+  font-size: 11px;
   font-weight: 700;
+  color: #2563eb;
+  margin-bottom: 8px;
+}
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  background: #2563eb;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #2563eb;
+}
+.header-section h1 {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0;
+  color: #0f172a;
+}
+.subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+  margin-bottom: 0;
+  line-height: 1.4;
+}
+
+/* Region Selector Bar & Dropdown */
+.region-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.region-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   white-space: nowrap;
 }
-
-.res-sub-info {
-  margin: 2px 0 0;
-  font-size: 0.68rem;
-  color: var(--text-secondary);
+.region-dropdown-wrapper {
+  position: relative;
+  flex: 1;
 }
-
-.label-header {
-  font-size: 0.58rem;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  display: block;
-  margin-bottom: 2px;
+.region-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #0f172a;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
 }
-
-.services-snippet, .hours-snippet, .eligibility-snippet {
-  margin: 0;
-  font-size: 0.68rem;
-  color: var(--text-secondary);
+.region-trigger:hover {
+  background: #f8fafc;
+  border-color: #2563eb;
+}
+.region-trigger-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
 }
-
-.bookmark-btn {
-  border: none;
-  background: transparent;
-  color: #cbd5e1;
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  transition: color 0.15s ease;
-}
-
-.bookmark-btn:hover {
-  color: #94a3b8;
-}
-
-.bookmark-btn.bookmarked {
-  color: var(--brand);
-}
-
-/* Empty State Card */
-.empty-state-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 30px;
-}
-
-.empty-icon {
-  color: #94a3b8;
-  margin-bottom: 10px;
-}
-
-.empty-state-card h4 {
-  margin: 0 0 6px;
-  font-size: 0.84rem;
-  color: var(--text-primary);
-}
-
-.empty-state-card p {
-  margin: 0;
-  font-size: 0.74rem;
-  color: var(--text-secondary);
-}
-
-/* Pagination Bar */
-.pagination-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.showing-lbl {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-}
-
-.pager-btns {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.pager-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.pager-btn.outlined {
+.region-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 6px;
   background: #ffffff;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-
-.pager-btn.outlined:hover {
-  background: #f8fafc;
-  color: var(--text-primary);
-}
-
-.pager-btn.active {
-  background: var(--brand);
-  border: none;
-  color: #ffffff;
-}
-
-.pager-dots {
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  padding: 0 4px;
-}
-
-/* Right Detail Sidebar Panel */
-.resource-detail-rail {
-  background: #ffffff;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-}
-
-.detail-container {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.detail-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.back-btn {
-  border: none;
-  background: transparent;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--brand);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-}
-
-.back-btn:hover {
-  text-decoration: underline;
-}
-
-.close-btn {
-  border: none;
-  background: transparent;
-  font-size: 1.15rem;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.close-btn:hover {
-  color: var(--text-primary);
-}
-
-.detail-icon-bubble {
-  width: 36px;
-  height: 36px;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.detail-icon-bubble.orange { background: #fff9db; color: #f59e0b; }
-.detail-icon-bubble.green { background: #e6fcf5; color: #10b981; }
-.detail-icon-bubble.purple { background: #f3f0ff; color: #8b5cf6; }
-.detail-icon-bubble.blue { background: #e7f5ff; color: #3b82f6; }
-.detail-icon-bubble.pink { background: #fdf2f8; color: #ec4899; }
-.detail-icon-bubble.rose { background: #fff1f2; color: #f43f5e; }
-
-.header-banner-row {
-  display: flex;
-  gap: 12px;
-}
-
-.title-col {
-  display: flex;
-  flex-direction: column;
-}
-
-.title-badge-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.detail-name {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-}
-
-.verified-tag {
-  font-size: 0.52rem;
-  background: #d1fae5;
-  color: #065f46;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-weight: 700;
-}
-
-.detail-sub-meta {
-  margin: 2px 0 0;
-  font-size: 0.68rem;
-  color: var(--text-secondary);
-}
-
-.rating-row {
-  margin-top: 4px;
-  font-size: 0.68rem;
-  color: #fbbf24;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.rating-row .reviews-count {
-  color: var(--text-secondary);
-}
-
-/* Action Buttons Box */
-.action-buttons-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.action-btn {
-  width: 100%;
-  border-radius: var(--radius-md);
-  font-size: 0.74rem;
-  font-weight: 700;
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.action-btn.primary {
-  background: var(--brand);
-  border: none;
-  color: #ffffff;
-}
-.action-btn.primary:hover {
-  background: var(--brand-dark);
-}
-
-.action-btn.outlined {
-  background: #ffffff;
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-}
-.action-btn.outlined:hover {
-  background: #f8fafc;
-}
-
-/* Services Offered */
-.sec-title {
-  margin: 0 0 6px;
-  font-size: 0.7rem;
-  color: var(--text-primary);
-  text-transform: uppercase;
-}
-
-.chips-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.service-tag {
-  font-size: 0.62rem;
-  background: #f1f5f9;
-  color: var(--text-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-/* Fields details box */
-.fields-details-box {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.field-item {
-  display: flex;
-  gap: 10px;
-}
-
-.field-icon {
-  color: var(--text-tertiary);
-  display: flex;
-  margin-top: 2px;
-}
-
-.field-content {
-  display: flex;
-  flex-direction: column;
-}
-
-.field-content .lbl {
-  font-size: 0.62rem;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-}
-
-.field-content .val {
-  margin: 1px 0 0;
-  font-size: 0.72rem;
-  color: var(--text-primary);
-  line-height: 1.35;
-}
-
-.val-link {
-  margin: 1px 0 0;
-  font-size: 0.72rem;
-  color: var(--brand);
-  text-decoration: none;
-}
-.val-link:hover {
-  text-decoration: underline;
-}
-
-.hours-list {
-  margin: 2px 0 0;
-  padding: 0;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+  z-index: 60;
+  padding: 6px;
   list-style: none;
+  width: 260px;
+  max-width: 90vw;
+}
+.county-search-box {
+  position: relative;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+}
+.c-search-icon {
+  position: absolute;
+  left: 8px;
+  color: #94a3b8;
+}
+.county-search-box input {
+  width: 100%;
+  padding: 6px 10px 6px 26px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #0f172a;
+}
+.county-search-box input:focus {
+  outline: none;
+  border-color: #2563eb;
+  background: #ffffff;
+}
+.county-scroll-list {
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-
-.hours-list li {
-  font-size: 0.7rem;
+.no-county-found {
+  padding: 12px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  font-style: italic;
+}
+.region-menu li {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.region-menu li:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.region-menu li.active {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 700;
+}
+.region-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+.region-item-name {
+  font-weight: 600;
+}
+.region-item-county {
+  font-size: 10px;
+  color: #64748b;
+}
+.region-menu li.active .region-item-county {
+  color: #3b82f6;
+}
+.custom-coord-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 4px;
+  padding-top: 8px !important;
+  color: #2563eb !important;
+  font-weight: 600;
+}
+.custom-coord-option:hover {
+  background: #eff6ff !important;
+}
+.custom-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.hours-list .days {
-  color: var(--text-secondary);
-  margin-right: 6px;
-}
-
-.hours-list .time {
-  color: var(--text-primary);
-}
-
-/* Eligibility Box */
-.eligibility-box .eligibility-text {
-  margin: 0;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-/* About Box */
-.about-box .about-text {
-  margin: 0;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-/* Recommended Callout */
-.why-recommended-callout {
-  background: #f0fdf4;
-  border: 1px solid #dcfce7;
-  border-radius: 10px;
-  padding: 10px 12px;
+/* Search & Filters */
+.search-filter-card {
   display: flex;
   gap: 8px;
+  padding: 12px 20px;
 }
-
-.why-recommended-callout .icon-bubble {
-  color: #16a34a;
+.search-input-box {
+  flex: 1;
+  position: relative;
   display: flex;
-  margin-top: 2px;
+  align-items: center;
+}
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: #64748b;
+}
+.search-input-box input {
+  width: 100%;
+  padding: 8px 30px 8px 34px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #0f172a;
+  font-size: 12px;
+}
+.search-input-box input:focus {
+  outline: none;
+  border-color: #2563eb;
+  background: #ffffff;
+}
+.clear-search {
+  position: absolute;
+  right: 10px;
+  color: #64748b;
+  font-size: 16px;
 }
 
-.callout-content {
+.radius-dropdown-wrapper {
+  position: relative;
+}
+.radius-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #334155;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.radius-trigger:hover {
+  background: #f8fafc;
+}
+.radius-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.1);
+  z-index: 50;
+  min-width: 110px;
+}
+.radius-menu li {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+}
+.radius-menu li:hover, .radius-menu li.active {
+  background: #2563eb;
+  color: white;
+}
+
+/* Category Pills */
+.categories-scroll-wrapper {
+  display: flex;
+  gap: 6px;
+  padding: 4px 20px 12px 20px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.category-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.category-pill:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.category-pill.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+}
+.category-pill.special {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+  color: #2563eb;
+}
+.category-pill.special.active {
+  background: #2563eb;
+  color: white;
+}
+.count-badge {
+  padding: 1px 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  font-size: 10px;
+}
+.category-pill.active .count-badge {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Resources List Container */
+.resources-list-container {
+  flex: 1;
+  padding: 14px 20px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  background: #f8fafc;
 }
-
-.callout-title {
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.list-header h3 {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
   margin: 0;
-  font-size: 0.72rem;
-  color: #14532d;
 }
-
-.callout-desc {
-  margin: 2px 0 0;
-  font-size: 0.68rem;
-  color: #166534;
-  line-height: 1.35;
+.loading-tag {
+  font-size: 11px;
+  color: #2563eb;
 }
-
-/* Placeholder state */
-.no-selection-state {
-  height: 100%;
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 30px;
+  padding: 40px 20px;
   text-align: center;
-  color: var(--text-tertiary);
+  color: #64748b;
+  gap: 12px;
 }
 
-.placeholder-icon {
-  margin-bottom: 12px;
-  color: #cbd5e1;
+/* Resource Cards */
+.resource-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
 }
+.resource-card:hover {
+  border-color: #3b82f6;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.1);
+}
+.resource-card.active {
+  border-color: #2563eb;
+  background: #f0f7ff;
+  box-shadow: 0 0 15px rgba(37, 99, 235, 0.15);
+}
+.resource-card.campaign {
+  border-color: #bfdbfe;
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+}
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.category-tag {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+.category-tag.campaign { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.category-tag.food { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.category-tag.health, .category-tag.clinic { background: #d1fae5; color: #047857; border: 1px solid #a7f3d0; }
+.category-tag.mental { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }
+.category-tag.transit { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.category-tag.housing { background: #fce7f3; color: #be185d; border: 1px solid #fbcfe8; }
+.category-tag.social { background: #ffe4e6; color: #be123c; border: 1px solid #fecdd3; }
+.category-tag.gym { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }
+.category-tag.park { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.category-tag.pharmacy { background: #ccfbf1; color: #0f766e; border: 1px solid #99f6e4; }
+.category-tag.other { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
 
-.placeholder-text {
-  font-size: 0.74rem;
-  line-height: 1.4;
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bookmark-btn {
+  color: #94a3b8;
+  transition: color 0.2s;
+}
+.bookmark-btn.bookmarked {
+  color: #ec4899;
+}
+.distance-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #dbeafe;
+}
+.resource-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  line-height: 1.3;
+}
+.resource-address, .resource-hours {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
   margin: 0;
 }
+.service-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.svc-tag {
+  font-size: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #334155;
+}
+.svc-more {
+  font-size: 10px;
+  color: #64748b;
+}
+.card-footer {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+.card-btn {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.card-btn.call {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  text-decoration: none;
+}
+.card-btn.call:hover {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+.card-btn.nav {
+  background: #2563eb;
+  color: white;
+  border: 1px solid #2563eb;
+}
+.card-btn.nav:hover {
+  background: #1d4ed8;
+}
 
-/* Home marker pulse */
-.home-marker-ping {
+/* Map Panel */
+.map-panel {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  position: relative;
+  background: #e2e8f0;
+}
+.map-container {
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+}
+
+/* CareMap Map Controls Bar (Top Left Horizontal) */
+.caremap-controls-bar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 35;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #cbd5e1;
+  backdrop-filter: blur(12px);
+  padding: 4px;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+}
+.map-control-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.map-control-btn.view-3d-btn {
+  font-size: 11px;
+  font-weight: 800;
+}
+.map-control-btn.view-3d-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+.badge-3d {
+  font-family: monospace, sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+}
+.map-control-btn:hover {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+/* Legend Pill */
+.caremap-legend-pill {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #cbd5e1;
+  backdrop-filter: blur(12px);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
+  color: #334155;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #334155;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dot.patient { background: #2563eb; box-shadow: 0 0 8px #2563eb; }
+.dot.campaign { background: #2563eb; }
+.dot.health { background: #059669; }
+.dot.food { background: #d97706; }
+
+/* Responsive Media Queries */
+
+/* Tablet & Laptop (769px - 1100px) */
+@media (max-width: 1100px) {
+  .sidebar-panel {
+    width: 350px;
+    min-width: 310px;
+  }
+  .search-filter-card {
+    flex-direction: column;
+  }
+  .radius-trigger {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .caremap-legend-pill {
+    top: 12px;
+    right: 12px;
+    padding: 5px 10px;
+    font-size: 10px;
+    gap: 8px;
+  }
+  .caremap-route-banner {
+    top: 60px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+}
+
+/* Mobile Screens (<= 768px) */
+@media (max-width: 768px) {
+  .caremap-resources-page.light-theme {
+    height: calc(100vh - 56px);
+  }
+
+  .mobile-view-toggle {
+    display: flex !important;
+  }
+
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .sidebar-panel {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    height: 100%;
+    border-right: none;
+  }
+
+  .sidebar-panel.mobile-hidden {
+    display: none !important;
+  }
+
+  .map-panel.mobile-hidden {
+    display: none !important;
+  }
+
+  .map-panel {
+    width: 100% !important;
+    height: 100%;
+  }
+
+  .caremap-legend-pill {
+    display: none; /* Hide legend pill on mobile to prevent clutter */
+  }
+
+  .caremap-controls-bar {
+    top: 10px;
+    left: 10px;
+  }
+
+  .caremap-route-banner {
+    top: 54px;
+    left: 10px;
+    right: 10px;
+    max-width: calc(100% - 20px);
+  }
+}
+</style>
+
+<style>
+/* Global MapLibre Custom Markers & Popups */
+.caremap-patient-marker {
   position: relative;
   width: 24px;
   height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.ping-circle {
+.caremap-patient-marker .radar-ping {
   position: absolute;
-  width: 100%;
-  height: 100%;
+  inset: -6px;
   border-radius: 50%;
-  background: rgba(79, 70, 229, 0.4);
-  animation: marker-pulse 1.5s infinite ease-out;
+  background: rgba(37, 99, 235, 0.3);
+  animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
-.core-circle {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 12px;
-  height: 12px;
+.caremap-patient-marker .core-dot {
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: #4f46e5;
+  background: #2563eb;
   border: 2px solid #ffffff;
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
-}
-@keyframes marker-pulse {
-  0% { transform: scale(0.5); opacity: 1; }
-  100% { transform: scale(1.8); opacity: 0; }
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.6);
 }
 
-/* ── RESPONSIVE OVERRIDES ── */
-@media (max-width: 1100px) {
-  .main-layout {
-    grid-template-columns: 1fr;
-    height: 100%;
-    overflow-y: auto;
-  }
-
-  .content-body {
-    height: auto;
-    overflow: visible;
-    padding: 16px 20px;
-    flex-shrink: 0;
-  }
-
-  .resource-detail-rail {
-    width: 100%;
-    height: auto;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    overflow: visible;
-    flex-shrink: 0;
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2.2);
+    opacity: 0;
   }
 }
 
-@media (max-width: 768px) {
-  .filters-panel {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  
-  .filter-item {
-    width: 100%;
-    flex: none;
-  }
+.caremap-resource-pin {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.caremap-resource-pin:hover {
+  transform: scale(1.35);
+  z-index: 99;
+}
+.caremap-resource-pin.selected {
+  transform: scale(1.4);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.5);
+  z-index: 100;
+}
+.caremap-resource-pin.campaign-pulse {
+  animation: pulse-border 1.5s infinite;
+}
 
-  .filter-item.radius-col {
-    flex: none;
-  }
-}
-/* Dropdown Animation */
-.dropdown-fade-enter-active,
-.dropdown-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
 
-.dropdown-fade-enter-from,
-.dropdown-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
+.caremap-resource-pin.campaign { background: #2563eb; }
+.caremap-resource-pin.food { background: #d97706; }
+.caremap-resource-pin.health { background: #059669; }
+.caremap-resource-pin.mental { background: #7c3aed; }
+.caremap-resource-pin.transit { background: #2563eb; }
+.caremap-resource-pin.housing { background: #db2777; }
+.caremap-resource-pin.social { background: #e11d48; }
+.caremap-resource-pin.gym { background: #9333ea; }
+.caremap-resource-pin.park { background: #059669; }
+
+/* Light Theme MapLibre Popups */
+.maplibregl-popup-content {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-radius: 14px !important;
+  padding: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 15px 35px rgba(15, 23, 42, 0.15) !important;
 }
+.maplibregl-popup-close-button {
+  color: #64748b !important;
+  font-size: 16px !important;
+  padding: 6px 10px !important;
+}
+
+.caremap-popup-card {
+  padding: 14px 16px;
+  min-width: 220px;
+  max-width: 260px;
+}
+.caremap-popup-card .popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.caremap-popup-card .category-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  display: inline-block;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+.caremap-popup-card .category-badge.campaign { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.caremap-popup-card .category-badge.food { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.caremap-popup-card .category-badge.health, .caremap-popup-card .category-badge.clinic { background: #d1fae5; color: #047857; border: 1px solid #a7f3d0; }
+.caremap-popup-card .category-badge.mental { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }
+.caremap-popup-card .category-badge.transit { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.caremap-popup-card .category-badge.housing { background: #fce7f3; color: #be185d; border: 1px solid #fbcfe8; }
+.caremap-popup-card .category-badge.social { background: #ffe4e6; color: #be123c; border: 1px solid #fecdd3; }
+.caremap-popup-card .category-badge.gym { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }
+.caremap-popup-card .category-badge.park { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.caremap-popup-card .category-badge.pharmacy { background: #ccfbf1; color: #0f766e; border: 1px solid #99f6e4; }
+.caremap-popup-card .category-badge.other { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+.caremap-popup-card .distance-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+}
+.caremap-popup-card .popup-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 6px 0;
+}
+.caremap-popup-card .popup-address, .caremap-popup-card .popup-hours {
+  font-size: 11px;
+  color: #475569;
+  margin: 2px 0;
+}
+.caremap-popup-card .popup-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.caremap-popup-card .popup-btn {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}
+.caremap-popup-card .call-btn { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.caremap-popup-card .maps-btn { background: #2563eb; color: #ffffff; }
 </style>
