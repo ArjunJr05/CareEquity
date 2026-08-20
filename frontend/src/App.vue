@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from './components/dashboard/AppSidebar.vue'
 import AppHeader from './components/dashboard/AppHeader.vue'
@@ -9,6 +9,8 @@ import { MAIN_BACKEND_URL } from './config'
 
 const route = useRoute()
 const router = useRouter()
+
+const isAdminRoute = computed(() => route.path.startsWith('/admin'))
 
 // Boot user from admin panel on logout
 watch([isLoggedIn, isAdmin], ([newLoggedIn, newAdmin]) => {
@@ -70,7 +72,7 @@ onMounted(async () => {
         <router-view />
       </div>
     </div>
-    <FloatingChatbot />
+    <FloatingChatbot v-if="!isAdminRoute" />
   </div>
 </template>
 
@@ -98,7 +100,8 @@ onMounted(async () => {
 .shell-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
 }

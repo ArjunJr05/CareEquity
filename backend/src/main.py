@@ -7,6 +7,7 @@ from .models.patient import Patient
 from .models.audit_log import AuditLog
 from .models.assessment_history import AssessmentHistory
 from .models.subscription import Subscription
+from .models.plan_config import PlanConfig
 from .api.routes import patients, auth, admin, history, payments, subscriptions
 
 # Create tables in the CareEquity database if they don't exist

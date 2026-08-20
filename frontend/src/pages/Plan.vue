@@ -26,33 +26,80 @@ const loadRazorpaySDK = () => {
   })
 }
 
-onMounted(() => {
-  loadRazorpaySDK()
-})
-
 const toggleBilling = (mode) => {
   isYearly.value = mode === 'yearly'
 }
 
 const handleExit = () => {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push('/')
+  router.push('/')
+}
+
+const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, orderId = null, signature = null) => {
+  const userEmail = localStorage.getItem('user_email') || 'doctor@careequity.com'
+  const storedUserId = localStorage.getItem('user_id')
+  const parsedUserId = storedUserId ? parseInt(storedUserId) : null
+
+  const payload = {
+    razorpay_payment_id: paymentId || (planKey === 'free' ? 'free_trial_15_days' : `pay_${Math.random().toString(36).substring(2, 12)}`),
+    razorpay_order_id: orderId || null,
+    razorpay_signature: signature || null,
+    plan: planKey,
+    billing_cycle: cycle,
+    user_email: userEmail,
+    user_id: parsedUserId
+  }
+
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/payments/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (res.ok) {
+      const data = await res.json()
+      console.log('Subscription saved successfully in PostgreSQL:', data)
+      if (data.user_id && !localStorage.getItem('user_id')) {
+        localStorage.setItem('user_id', data.user_id)
+      }
+      return data
+    }
+  } catch (e) {
+    console.warn('verify-payment error, trying direct subscribe:', e)
+  }
+
+  // Backup fallback: direct /api/subscriptions/subscribe
+  try {
+    const res2 = await fetch(`${MAIN_BACKEND_URL}/api/subscriptions/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: parsedUserId,
+        user_email: userEmail,
+        subscribe: true,
+        plan: planKey,
+        validity: cycle
+      })
+    })
+    if (res2.ok) {
+      const data2 = await res2.json()
+      console.log('Direct subscription saved:', data2)
+      return data2
+    }
+  } catch (err2) {
+    console.error('Subscription backend save error:', err2)
   }
 }
 
 const selectPlan = async (planKey, title) => {
-  if (userPlan.value === planKey) {
-    return
-  }
+  const currentCycle = planKey === 'free' ? '15_days' : (isYearly.value ? 'yearly' : 'monthly')
 
   // 1. If FREE plan, activate directly without payment checkout
   if (planKey === 'free') {
     setUserPlan('free')
     selectedPlanTitle.value = title
-    paymentDetails.value = null
+    paymentDetails.value = { razorpay_payment_id: 'free_trial_15_days' }
     showConfirmationModal.value = true
+    await saveSubscriptionToBackend('free', '15_days', 'free_trial_15_days')
     return
   }
 
@@ -74,7 +121,7 @@ const selectPlan = async (planKey, title) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         plan: planKey,
-        billing_cycle: isYearly.value ? 'yearly' : 'monthly',
+        billing_cycle: currentCycle,
         amount: monthlyOrYearlyPrice,
         user_email: localStorage.getItem('user_email') || 'doctor@careequity.com'
       })
@@ -100,20 +147,13 @@ const selectPlan = async (planKey, title) => {
     order_id: razorpayOrderId || undefined,
     handler: async function (response) {
       isProcessingPayment.value = false
-      try {
-        await fetch(`${MAIN_BACKEND_URL}/api/payments/verify-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_order_id: response.razorpay_order_id,
-            razorpay_signature: response.razorpay_signature,
-            plan: planKey
-          })
-        })
-      } catch (verifyErr) {
-        console.warn('Payment verify fallback:', verifyErr)
-      }
+      await saveSubscriptionToBackend(
+        planKey,
+        currentCycle,
+        response.razorpay_payment_id,
+        response.razorpay_order_id,
+        response.razorpay_signature
+      )
 
       setUserPlan(planKey)
       paymentDetails.value = response
@@ -141,18 +181,42 @@ const selectPlan = async (planKey, title) => {
   } else {
     // Fallback if Razorpay SDK script is blocked
     isProcessingPayment.value = false
+    const fallbackPayId = `pay_fallback_${Math.random().toString(36).substring(2, 10)}`
+    await saveSubscriptionToBackend(planKey, currentCycle, fallbackPayId)
     setUserPlan(planKey)
     selectedPlanTitle.value = title
-    paymentDetails.value = { razorpay_payment_id: `pay_test_${Math.random().toString(36).substring(2, 10)}` }
+    paymentDetails.value = { razorpay_payment_id: fallbackPayId }
     showConfirmationModal.value = true
   }
 }
 
 const closeConfirmation = () => {
   showConfirmationModal.value = false
+  router.push('/')
 }
 
-const plans = computed(() => [
+const dynamicPlans = ref([])
+
+const fetchDynamicPlans = async () => {
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/subscriptions/plans`)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        dynamicPlans.value = data
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch dynamic plans, using defaults:', err)
+  }
+}
+
+onMounted(() => {
+  loadRazorpaySDK()
+  fetchDynamicPlans()
+})
+
+const defaultPlans = [
   {
     key: 'free',
     title: 'FREE',
@@ -216,7 +280,28 @@ const plans = computed(() => [
     buttonClass: 'btn-primary',
     isPopular: false
   }
-])
+]
+
+const plans = computed(() => {
+  if (dynamicPlans.value && dynamicPlans.value.length > 0) {
+    return dynamicPlans.value.map(dp => {
+      const match = defaultPlans.find(d => d.key === dp.key) || {}
+      return {
+        key: dp.key,
+        title: dp.title || match.title,
+        icon: dp.icon || match.icon || (dp.key === 'free' ? 'gift' : (dp.key === 'basic' ? 'shield' : 'crown')),
+        monthlyPrice: Number(dp.monthlyPrice ?? match.monthlyPrice ?? 0),
+        yearlyPrice: Number(dp.yearlyPrice ?? match.yearlyPrice ?? 0),
+        subtitle: dp.subtitle || match.subtitle,
+        features: dp.features && dp.features.length > 0 ? dp.features : (match.features || []),
+        buttonText: dp.key === 'free' ? 'Start Free' : (userPlan.value === dp.key ? 'Subscribed' : (dp.key === 'basic' ? 'Get Basic' : 'Get Pro')),
+        buttonClass: dp.key === 'free' ? 'btn-outline' : 'btn-primary',
+        isPopular: dp.isPopular !== undefined ? dp.isPopular : (match.isPopular || false)
+      }
+    })
+  }
+  return defaultPlans
+})
 </script>
 
 <template>
@@ -349,10 +434,8 @@ const plans = computed(() => [
           :class="{ 'active-plan': userPlan === plan.key }"
         >
           <!-- Featured Header Badges -->
-          <template v-if="plan.key === 'basic'">
-            <div class="badge-tag tag-popular">MOST POPULAR</div>
-            <div class="badge-tag tag-your-plan" v-if="userPlan === 'basic'">Your Plan</div>
-          </template>
+          <div class="badge-tag tag-popular" v-if="plan.isPopular">MOST POPULAR</div>
+          <div class="badge-tag tag-your-plan" v-if="userPlan === plan.key">Your Plan</div>
 
           <div class="card-body">
             <div>
@@ -749,23 +832,7 @@ const plans = computed(() => [
   overflow: visible;
 }
 
-@keyframes iconSpin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.plan-card:hover .plan-icon-box svg,
-.plan-icon-box:hover svg {
-  animation: iconSpin 3.5s linear infinite;
-}
-
-.header-brand:hover .brand-logo-img {
-  animation: iconSpin 4s linear infinite;
-}
+/* Static Plan Icons */
 
 .plan-icon-box {
   width: 44px;
@@ -850,16 +917,17 @@ const plans = computed(() => [
 }
 
 .check-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #1d6bf3;
+  background: #10b981;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   margin-top: 1px;
+  box-shadow: 0 1.5px 4px rgba(16, 185, 129, 0.35);
 }
 
 .feature-text {

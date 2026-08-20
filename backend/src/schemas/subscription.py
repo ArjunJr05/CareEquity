@@ -1,10 +1,12 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 
 
 class SubscriptionCreate(BaseModel):
-    user_id: int
-    subscribe: bool
+    user_id: Optional[int] = None
+    user_email: Optional[str] = None
+    subscribe: bool = True
     plan: str
     validity: str
 

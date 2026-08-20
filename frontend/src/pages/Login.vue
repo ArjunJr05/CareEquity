@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { setLoggedIn, setShowLoginScreen, setAdmin, userPlan, setUserPlan } from '../store/appState'
-import { MAIN_BACKEND_URL } from '../config'
+import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
+import { LOGO_BASE64 } from '../assets/logoBase64.js'
 
 const router = useRouter()
 
@@ -13,14 +14,160 @@ const currentStep = ref('login')
 const billingCycle = ref('yearly') // 'monthly' or 'yearly'
 const activeSelectedPlan = ref(userPlan.value || 'basic')
 
-const selectPlan = (planId) => {
+const loadRazorpaySDK = () => {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true)
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.onload = () => resolve(true)
+    script.onerror = () => resolve(false)
+    document.body.appendChild(script)
+  })
+}
+
+const finishLogin = () => {
+  setLoggedIn(true)
+  setShowLoginScreen(false)
+  router.push('/')
+}
+
+const saveLoginSubscription = async (planId, cycle, paymentId = null, orderId = null, signature = null) => {
+  const userEmail = localStorage.getItem('user_email') || loginEmail.value || signupEmail.value || 'doctor@careequity.com'
+  const storedUserId = localStorage.getItem('user_id')
+  const parsedUserId = storedUserId ? parseInt(storedUserId) : null
+
+  const payload = {
+    razorpay_payment_id: paymentId || (planId === 'free' ? 'free_trial_15_days' : `pay_${Math.random().toString(36).substring(2, 12)}`),
+    razorpay_order_id: orderId || null,
+    razorpay_signature: signature || null,
+    plan: planId,
+    billing_cycle: cycle,
+    user_email: userEmail,
+    user_id: parsedUserId
+  }
+
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/payments/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.user_id && !localStorage.getItem('user_id')) {
+        localStorage.setItem('user_id', data.user_id)
+      }
+      return data
+    }
+  } catch (e) {
+    console.warn('verify-payment error from login:', e)
+  }
+
+  try {
+    await fetch(`${MAIN_BACKEND_URL}/api/subscriptions/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: parsedUserId,
+        user_email: userEmail,
+        subscribe: true,
+        plan: planId,
+        validity: cycle
+      })
+    })
+  } catch (err2) {
+    console.error('Login subscription save fallback error:', err2)
+  }
+}
+
+const selectPlan = async (planId, title) => {
   activeSelectedPlan.value = planId
   setUserPlan(planId)
-  showToast(`Subscribed to ${planId.toUpperCase()} plan! Welcome to CareEquity.`, 'success')
-  setTimeout(() => {
-    setLoggedIn(true)
-    setShowLoginScreen(false)
-  }, 1000)
+  const currentCycle = planId === 'free' ? '15_days' : billingCycle.value
+
+  if (planId === 'free') {
+    await saveLoginSubscription('free', '15_days', 'free_trial_15_days')
+    showToast(`Subscribed to FREE plan! Welcome to CareEquity.`, 'success')
+    setTimeout(() => {
+      finishLogin()
+    }, 800)
+    return
+  }
+
+  await loadRazorpaySDK()
+  const prices = {
+    basic: billingCycle.value === 'yearly' ? 1068 : 99,
+    pro: billingCycle.value === 'yearly' ? 2904 : 269
+  }
+  const planPrice = prices[planId] || 99
+  const amountInPaise = Math.round(planPrice * 100)
+
+  let razorpayOrderId = null
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/payments/create-order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plan: planId,
+        billing_cycle: currentCycle,
+        amount: planPrice,
+        user_email: localStorage.getItem('user_email') || loginEmail.value || signupEmail.value || 'doctor@careequity.com'
+      })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      razorpayOrderId = data.order_id
+    }
+  } catch (err) {
+    console.warn('Payment order fallback:', err)
+  }
+
+  const options = {
+    key: RAZORPAY_KEY_ID,
+    amount: amountInPaise,
+    currency: 'INR',
+    name: 'CareEquity',
+    description: `${title || planId.toUpperCase()} Plan (${billingCycle.value === 'yearly' ? 'Billed Yearly' : 'Billed Monthly'})`,
+    image: LOGO_BASE64,
+    order_id: razorpayOrderId || undefined,
+    handler: async function (response) {
+      await saveLoginSubscription(
+        planId,
+        currentCycle,
+        response.razorpay_payment_id,
+        response.razorpay_order_id,
+        response.razorpay_signature
+      )
+      showToast(`Payment Successful! (ID: ${response.razorpay_payment_id})`, 'success')
+      setUserPlan(planId)
+      setTimeout(() => {
+        finishLogin()
+      }, 1000)
+    },
+    prefill: {
+      name: localStorage.getItem('user_name') || signupName.value || 'Dr. Jane Smith',
+      email: localStorage.getItem('user_email') || loginEmail.value || signupEmail.value || 'doctor@careequity.com',
+      contact: '9876543210'
+    },
+    theme: {
+      color: '#1d6bf3'
+    }
+  }
+
+  if (window.Razorpay) {
+    const rzp = new window.Razorpay(options)
+    rzp.open()
+  } else {
+    const fallbackPayId = `pay_fallback_${Math.random().toString(36).substring(2, 10)}`
+    await saveLoginSubscription(planId, currentCycle, fallbackPayId)
+    showToast(`Subscribed to ${planId.toUpperCase()} plan! Welcome to CareEquity.`, 'success')
+    setTimeout(() => {
+      finishLogin()
+    }, 800)
+  }
 }
 
 // Form Inputs
@@ -126,14 +273,17 @@ const handleSignIn = async () => {
       showToast(errData.detail || 'Failed to authenticate.', 'error')
     } else {
       const data = await response.json()
-      showToast('Successfully authenticated! Please select your plan.', 'success')
+      showToast('Successfully authenticated! Welcome to CareEquity.', 'success')
       // Save session info
       localStorage.setItem('docpat_logged_in', 'true')
+      if (data.id) localStorage.setItem('user_id', data.id)
       localStorage.setItem('user_email', data.email)
       localStorage.setItem('user_name', data.name)
+      setLoggedIn(true)
+      setShowLoginScreen(false)
       setTimeout(() => {
-        currentStep.value = 'plans'
-      }, 600)
+        router.push('/')
+      }, 500)
     }
   } catch (error) {
     showToast('Could not connect to authentication server.', 'error')
@@ -218,14 +368,17 @@ const handleVerifyOTP = async () => {
       showToast(errData.detail || 'OTP verification failed.', 'error')
     } else {
       const data = await response.json()
-      showToast('OTP verified! Select a subscription plan to continue.', 'success')
+      showToast('OTP verified! Welcome to CareEquity.', 'success')
       // Save session info
       localStorage.setItem('docpat_logged_in', 'true')
+      if (data.id) localStorage.setItem('user_id', data.id)
       localStorage.setItem('user_email', data.email)
       localStorage.setItem('user_name', data.name)
+      setLoggedIn(true)
+      setShowLoginScreen(false)
       setTimeout(() => {
-        currentStep.value = 'plans'
-      }, 600)
+        router.push('/')
+      }, 500)
     }
   } catch (error) {
     showToast('Could not connect to authentication server.', 'error')
@@ -465,13 +618,13 @@ onUnmounted(() => {
 
       <!-- ── STEP 4: SUBSCRIPTION PLANS (Shown after OTP / Sign In) ── -->
       <section v-else class="plans-full-container">
-        <button class="auth-close-btn" @click="handleCancelLogin" title="Skip Plan Selection">
+        <button class="auth-close-btn" @click="finishLogin" title="Skip Plan Selection">
           <span>Skip & Exit →</span>
         </button>
 
         <div class="plans-header">
           <div class="left-logo central">
-            <img src="/assets/careequity_logo.png" style="width: 36px; height: 36px; object-fit: contain;" alt="CareEquity Logo" />
+            <img src="/assets/careequity_remove.png" style="width: 36px; height: 36px; object-fit: contain;" alt="CareEquity Logo" />
             <div class="brand-text">
               <p class="brand-name" style="font-size: 20px;">CareEquity Plans</p>
             </div>
@@ -492,11 +645,15 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 4 Pricing Cards Grid -->
+        <!-- 3 Pricing Cards Grid -->
         <div class="plans-grid">
           
           <!-- Plan 1: FREE -->
-          <div class="plan-card" :class="{ active: activeSelectedPlan === 'free' }">
+          <div class="plan-card" :class="{ 'active-plan': activeSelectedPlan === 'free' }">
+            <div class="top-badge-row" v-if="activeSelectedPlan === 'free'">
+              <span class="your-plan-badge" style="margin-left: auto;">Your Plan</span>
+            </div>
+
             <div class="card-plan-header">
               <span class="plan-type">FREE</span>
               <div class="plan-price-box">
@@ -518,23 +675,23 @@ onUnmounted(() => {
               <li class="check"><span class="icon">✓</span> <strong>Limited personalized recommendations</strong></li>
             </ul>
 
-            <button class="plan-action-btn free-btn" @click="selectPlan('free')">
+            <button class="plan-action-btn free-btn" :class="{ 'active-btn': activeSelectedPlan === 'free' }" @click="selectPlan('free', 'FREE')">
               {{ activeSelectedPlan === 'free' ? '✓ Current Plan' : 'Start Free' }}
             </button>
           </div>
 
-          <!-- Plan 2: BASIC (Featured / Default) -->
-          <div class="plan-card featured" :class="{ active: activeSelectedPlan === 'basic' }">
+          <!-- Plan 2: BASIC -->
+          <div class="plan-card" :class="{ 'active-plan': activeSelectedPlan === 'basic' }">
             <div class="top-badge-row">
               <span class="pop-badge">MOST POPULAR</span>
-              <span class="your-plan-badge">Your Plan</span>
+              <span class="your-plan-badge" v-if="activeSelectedPlan === 'basic'">Your Plan</span>
             </div>
 
             <div class="card-plan-header">
               <span class="plan-type">BASIC</span>
               <div class="plan-price-box">
                 <span class="currency">₹</span>
-                <span class="amount">{{ billingCycle === 'yearly' ? '1069' : '99' }}</span>
+                <span class="amount">{{ billingCycle === 'yearly' ? '1068' : '99' }}</span>
                 <span class="period">{{ billingCycle === 'yearly' ? '/yr' : '/mo' }}</span>
               </div>
               <p class="plan-sub-price" v-if="billingCycle === 'yearly'">≈ ₹89/mo · save ₹119/yr</p>
@@ -552,21 +709,25 @@ onUnmounted(() => {
               <li class="check"><span class="icon">✓</span> <strong>Chat bot unlimited</strong></li>
             </ul>
 
-            <button class="plan-action-btn basic-btn" @click="selectPlan('basic')">
+            <button class="plan-action-btn basic-btn" :class="{ 'active-btn': activeSelectedPlan === 'basic' }" @click="selectPlan('basic', 'BASIC')">
               {{ activeSelectedPlan === 'basic' ? '✓ Subscribed' : 'Select Basic' }}
             </button>
           </div>
 
           <!-- Plan 3: PRO -->
-          <div class="plan-card" :class="{ active: activeSelectedPlan === 'pro' }">
+          <div class="plan-card" :class="{ 'active-plan': activeSelectedPlan === 'pro' }">
+            <div class="top-badge-row" v-if="activeSelectedPlan === 'pro'">
+              <span class="your-plan-badge" style="margin-left: auto;">Your Plan</span>
+            </div>
+
             <div class="card-plan-header">
               <span class="plan-type">PRO</span>
               <div class="plan-price-box">
                 <span class="currency">₹</span>
-                <span class="amount">{{ billingCycle === 'yearly' ? '3228' : '269' }}</span>
+                <span class="amount">{{ billingCycle === 'yearly' ? '2904' : '269' }}</span>
                 <span class="period">{{ billingCycle === 'yearly' ? '/yr' : '/mo' }}</span>
               </div>
-              <p class="plan-sub-price" v-if="billingCycle === 'yearly'">≈ ₹269/mo · save ₹360/yr</p>
+              <p class="plan-sub-price" v-if="billingCycle === 'yearly'">≈ ₹242/mo · save ₹360/yr</p>
               <p class="plan-desc">Advanced SDOH analytics, AI insights, and predictive intelligence.</p>
             </div>
 
@@ -581,7 +742,7 @@ onUnmounted(() => {
               <li class="check"><span class="icon">✓</span> <strong>AI SDOH Assistant for personalized guidance</strong></li>
             </ul>
 
-            <button class="plan-action-btn pro-btn" @click="selectPlan('pro')">
+            <button class="plan-action-btn pro-btn" :class="{ 'active-btn': activeSelectedPlan === 'pro' }" @click="selectPlan('pro', 'PRO')">
               {{ activeSelectedPlan === 'pro' ? '✓ Subscribed' : 'Get Pro' }}
             </button>
           </div>
@@ -1247,9 +1408,9 @@ input:checked + .slider:before {
   transform: translateY(-4px);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
 }
-.plan-card.featured {
-  border: 2px solid #2563eb;
-  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.15);
+.plan-card.active-plan {
+  border: 2.2px solid #1d6bf3 !important;
+  box-shadow: 0 12px 32px rgba(29, 107, 243, 0.2) !important;
   background: #ffffff;
 }
 
@@ -1261,23 +1422,33 @@ input:checked + .slider:before {
   display: flex;
   justify-content: space-between;
   padding: 0 16px;
+  z-index: 10;
 }
 .pop-badge {
-  background: #0369a1;
+  background: #1d6bf3;
   color: white;
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 10px;
+  padding: 3px 10px;
+  border-radius: 9999px;
   letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(29, 107, 243, 0.3);
 }
 .your-plan-badge {
-  background: #16a34a;
+  background: #1d6bf3;
   color: white;
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 10px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 8px rgba(29, 107, 243, 0.3);
+}
+
+.plan-action-btn.active-btn {
+  background: #1d6bf3 !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(29, 107, 243, 0.3) !important;
 }
 
 .card-plan-header {
