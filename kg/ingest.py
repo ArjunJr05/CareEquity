@@ -206,7 +206,8 @@ def main():
     
     try:
         # Load CSV and compute stats
-        df = pd.read_csv(r"d:\KNOW GRAPH ANTYGRA\SDOH_MODEL_DATA.csv")
+        csv_path = os.path.join(os.path.dirname(__file__), "src", "SDOH_MODEL_DATA.csv")
+        df = pd.read_csv(csv_path)
         means = df.mean(numeric_only=True)
         stds = df.std(numeric_only=True)
         

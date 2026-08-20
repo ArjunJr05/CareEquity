@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from pyvis.network import Network
@@ -22,6 +23,7 @@ load_dotenv()
 NEO4J_URI = os.getenv("NEO4J_URI", "")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+FASTAPI_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000").rstrip("/")
 
 # Custom CSS for dark glassmorphism styling
 st.markdown("""
@@ -56,100 +58,105 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# --- DATA & API CLIENT FUNCTIONS ---
+
+@st.cache_data(ttl=60)
+def check_fastapi_health(api_url):
+    """Checks if FastAPI backend server is online."""
+    try:
+        resp = requests.get(f"{api_url}/health", timeout=2.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 @st.cache_data
 def load_csv_data():
-    """Loads CSV for county search autocompletion."""
-    df = pd.read_csv(r"d:\KNOW GRAPH ANTYGRA\SDOH_MODEL_DATA.csv")
+    """Loads CSV locally (Fallback mode)."""
+    csv_path = os.path.join(os.path.dirname(__file__), "src", "SDOH_MODEL_DATA.csv")
+    df = pd.read_csv(csv_path)
     df['fips_str'] = df['county_fips'].astype(int).astype(str)
     return df
 
+
 @st.cache_resource
 def get_neo4j_driver(uri, user, pwd):
-    """Cached driver connection to Neo4j Aura."""
+    """Cached driver connection to Neo4j Aura (Fallback mode)."""
     try:
         driver = GraphDatabase.driver(uri, auth=(user, pwd))
-        # Verify connectivity
         driver.verify_connectivity()
         return driver
-    except Exception as e:
+    except Exception:
         return None
 
-df_csv = load_csv_data()
-driver = get_neo4j_driver(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
 
-# --- SIDEBAR ---
-st.sidebar.title("🕸️ SDoH Graph Control")
-st.sidebar.markdown("---")
+# Helper functions to query FastAPI backend REST API
+def fetch_counties_from_api(api_url):
+    try:
+        resp = requests.get(f"{api_url}/api/counties", timeout=3.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
-# Database status
-if driver:
-    st.sidebar.success(f" Connected to Neo4j Aura")
-    st.sidebar.caption(f"**URI:** `{NEO4J_URI}`")
-else:
-    st.sidebar.error(" Failed to connect to Neo4j Aura. Check `.env` settings.")
 
-# Fixed internal graph configuration settings
-min_correlation = 0.40
-show_correlation_edges = False
-physics_enabled = True
+def fetch_county_overview_from_api(api_url, fips):
+    try:
+        resp = requests.get(f"{api_url}/api/county/{fips}", timeout=3.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
-# --- MAIN INTERFACE ---
-st.title("Social Determinants of Health (SDoH) Knowledge Graph")
-st.markdown("Explore how county-level socioeconomic barriers, infrastructure, and food access correlate with chronic health outcomes.")
 
-# Selection Controls
-col_search1, col_search2 = st.columns([1, 2])
+def fetch_graph_from_api(api_url, fips):
+    try:
+        resp = requests.get(f"{api_url}/api/county/{fips}/graph", timeout=5.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Normalize field names for Pyvis (from_node -> from, to_node -> to)
+            nodes = data.get('nodes', [])
+            edges = []
+            for e in data.get('edges', []):
+                e_copy = dict(e)
+                if 'from_node' in e_copy:
+                    e_copy['from'] = e_copy.pop('from_node')
+                if 'to_node' in e_copy:
+                    e_copy['to'] = e_copy.pop('to_node')
+                edges.append(e_copy)
+            return nodes, edges
+    except Exception:
+        pass
+    return None, None
 
-with col_search1:
-    # Direct FIPS Input
-    input_fips = st.text_input("Enter County FIPS Code:", value="1001", help="e.g. 1001 for Autauga County, AL")
 
-with col_search2:
-    # Autocomplete Dropdown
-    county_options = df_csv.apply(lambda r: f"{r['county_name']} ({r['fips_str']})", axis=1).tolist()
-    
-    # Default index for Autauga County (1001)
-    default_idx = 0
-    for idx, opt in enumerate(county_options):
-        if "(1001)" in opt:
-            default_idx = idx
-            break
-            
-    selected_county_option = st.selectbox("Or Select County by Name:", options=county_options, index=default_idx)
-    selected_fips_from_dropdown = selected_county_option.split("(")[-1].replace(")", "").strip()
+def fetch_sdoh_from_api(api_url, fips):
+    try:
+        resp = requests.get(f"{api_url}/api/county/{fips}/sdoh", timeout=3.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
-# Resolve FIPS code (Prioritize manual FIPS if modified, else dropdown)
-if input_fips != "1001" and input_fips in df_csv['fips_str'].values:
-    active_fips = input_fips
-else:
-    active_fips = selected_fips_from_dropdown
 
-# Retrieve County Data from CSV
-county_info = df_csv[df_csv['fips_str'] == active_fips]
+def fetch_health_from_api(api_url, fips):
+    try:
+        resp = requests.get(f"{api_url}/api/county/{fips}/health-outcomes", timeout=3.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
-if county_info.empty:
-    st.error(f"County FIPS `{active_fips}` not found in dataset. Please enter a valid FIPS code.")
-    st.stop()
 
-c_row = county_info.iloc[0]
-
-# --- KPI METRICS HEADER ---
-st.markdown("### 📌 County Overview")
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("County Name", c_row['county_name'])
-m2.metric("State", c_row['state_abbr'])
-m3.metric("Population", f"{int(c_row['population']):,}")
-m4.metric("Median Income", f"${c_row['median_household_income']:,.0f}" if not pd.isna(c_row['median_household_income']) else "N/A")
-m5.metric("SVI Score (Overall)", f"{c_row['svi_overall']:.4f}" if not pd.isna(c_row['svi_overall']) else "N/A")
-
-st.markdown("---")
-
-# Function to query Neo4j Graph for Active County
-def query_county_graph(driver, fips):
-    """
-    Queries Neo4j Aura for the target county's node, connected State, 
-    and the top 10 SDoH factors affecting that county.
-    """
+# Fallback Direct Neo4j Query Function
+def query_county_graph_direct(driver, fips):
     nodes = {}
     edges = []
     sdoh_factors_list = []
@@ -168,7 +175,6 @@ def query_county_graph(driver, fips):
             r = record['r']
             f = record['f']
             
-            # Central County Node
             if 'County' not in nodes:
                 nodes['County'] = {
                     'id': f"county_{c['fips']}",
@@ -179,7 +185,6 @@ def query_county_graph(driver, fips):
                     'title': f"<b>{c['name']}</b><br>FIPS: {c['fips']}<br>Population: {c['population']:,}<br>Income: ${c['median_household_income']:,.0f}<br>SVI Score: {c['svi_overall']:.4f}"
                 }
                 
-            # State Node
             if s and 'State' not in nodes:
                 n_id = f"state_{s['abbr']}"
                 nodes['State'] = {
@@ -199,13 +204,11 @@ def query_county_graph(driver, fips):
                     'dashes': True
                 })
                 
-            # SDoH Factor
             if f:
                 r_props = dict(r)
                 val = r_props.get('value', 0)
                 sev = r_props.get('severity', 'Medium')
                 
-                # Assign sort priority (High Risk > Medium > Low/Protective)
                 if 'High Risk' in sev:
                     prio = 0
                 elif 'Medium' in sev:
@@ -221,11 +224,9 @@ def query_county_graph(driver, fips):
                     'priority': prio
                 })
 
-    # Sort factors by priority and pick top 10
     sdoh_factors_list.sort(key=lambda x: x['priority'])
     top10_factors = sdoh_factors_list[:10]
     
-    # Add top 10 SDoH factor nodes and edges
     for factor in top10_factors:
         fname = factor['factor_name']
         val = factor['value']
@@ -233,11 +234,11 @@ def query_county_graph(driver, fips):
         n_id = f"sdoh_{fname}"
         
         if 'High Risk' in sev:
-            color = '#ef4444' # Red
+            color = '#ef4444'
         elif 'Low' in sev or 'Protective' in sev:
-            color = '#10b981' # Green
+            color = '#10b981'
         else:
-            color = '#f59e0b' # Amber
+            color = '#f59e0b'
             
         nodes[n_id] = {
             'id': n_id,
@@ -258,6 +259,100 @@ def query_county_graph(driver, fips):
         
     return list(nodes.values()), edges
 
+
+# Initialize Services & Fallbacks
+api_health = check_fastapi_health(FASTAPI_URL)
+use_fastapi = api_health is not None
+
+df_csv = load_csv_data()
+driver = get_neo4j_driver(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
+
+# --- SIDEBAR STATUS ---
+st.sidebar.title("🕸️ SDoH Control Panel")
+st.sidebar.markdown("---")
+
+# Service Status Badges
+if use_fastapi:
+    st.sidebar.success(f" FastAPI REST Backend Connected (`{FASTAPI_URL}`)")
+else:
+    st.sidebar.warning(f" FastAPI REST Server Offline (`{FASTAPI_URL}`). Using direct fallback mode.")
+
+if api_health and api_health.get('db_connected'):
+    st.sidebar.success(" Neo4j Aura Database Connected (via FastAPI)")
+elif driver:
+    st.sidebar.success(" Connected directly to Neo4j Aura")
+else:
+    st.sidebar.error(" Neo4j Aura Disconnected. Check `.env` settings.")
+
+# Fixed internal graph configuration settings
+physics_enabled = True
+
+# --- MAIN INTERFACE ---
+st.title("Social Determinants of Health (SDoH) Knowledge Graph")
+st.markdown("Explore county-level socioeconomic barriers, infrastructure, food access, and chronic health outcomes powered by **FastAPI & Neo4j**.")
+
+# Selection Controls
+col_search1, col_search2 = st.columns([1, 2])
+
+# Load county list for autocomplete (from FastAPI if available, else pandas)
+api_counties = fetch_counties_from_api(FASTAPI_URL) if use_fastapi else None
+
+if api_counties:
+    county_options = [c['display_label'] for c in api_counties]
+else:
+    county_options = df_csv.apply(lambda r: f"{r['county_name']} ({r['fips_str']})", axis=1).tolist()
+
+default_idx = 0
+for idx, opt in enumerate(county_options):
+    if "(1001)" in opt:
+        default_idx = idx
+        break
+
+with col_search1:
+    input_fips = st.text_input("Enter County FIPS Code:", value="1001", help="e.g. 1001 for Autauga County, AL")
+
+with col_search2:
+    selected_county_option = st.selectbox("Or Select County by Name:", options=county_options, index=default_idx)
+    selected_fips_from_dropdown = selected_county_option.split("(")[-1].replace(")", "").strip()
+
+# Resolve active FIPS code
+if input_fips != "1001" and input_fips in df_csv['fips_str'].values:
+    active_fips = input_fips
+else:
+    active_fips = selected_fips_from_dropdown
+
+# Fetch County Overview Data
+api_overview = fetch_county_overview_from_api(FASTAPI_URL, active_fips) if use_fastapi else None
+
+if api_overview:
+    c_name = api_overview['county_name']
+    c_state = api_overview['state_abbr']
+    c_pop = api_overview['population']
+    c_income = api_overview['median_household_income']
+    c_svi = api_overview['svi_overall']
+else:
+    county_info = df_csv[df_csv['fips_str'] == active_fips]
+    if county_info.empty:
+        st.error(f"County FIPS `{active_fips}` not found in dataset.")
+        st.stop()
+    c_row = county_info.iloc[0]
+    c_name = c_row['county_name']
+    c_state = c_row['state_abbr']
+    c_pop = c_row['population']
+    c_income = c_row['median_household_income']
+    c_svi = c_row['svi_overall']
+
+# --- KPI METRICS HEADER ---
+st.markdown("### 📌 County Overview")
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("County Name", c_name)
+m2.metric("State", c_state)
+m3.metric("Population", f"{int(c_pop):,}")
+m4.metric("Median Income", f"${c_income:,.0f}" if c_income and not pd.isna(c_income) else "N/A")
+m5.metric("SVI Score (Overall)", f"{c_svi:.4f}" if c_svi and not pd.isna(c_svi) else "N/A")
+
+st.markdown("---")
+
 # --- TABBED LAYOUT ---
 tab_graph, tab_sdoh, tab_health = st.tabs([
     "🕸️ Interactive Knowledge Graph",
@@ -269,87 +364,100 @@ with tab_graph:
     st.markdown("#### 🔍 Top 10 SDoH Factors Knowledge Graph")
     st.caption("Clean, interactive radial graph showing the central County node connected to its State and the Top 10 SDoH features affecting this county.")
 
-    if driver:
-        nodes, edges = query_county_graph(driver, active_fips)
+    nodes, edges = None, None
+
+    # Try fetching graph via FastAPI REST API first
+    if use_fastapi:
+        nodes, edges = fetch_graph_from_api(FASTAPI_URL, active_fips)
+
+    # Fallback to direct Neo4j query if FastAPI graph was not fetched
+    if not nodes and driver:
+        nodes, edges = query_county_graph_direct(driver, active_fips)
+
+    if not nodes:
+        st.warning(f"No graph data returned for FIPS `{active_fips}`. Ensure Neo4j Aura and `ingest.py` have been executed.")
+    else:
+        # Build Pyvis Network
+        net = Network(height="650px", width="100%", bgcolor="#0f172a", font_color="#ffffff", heading="")
+        net.options.physics.enabled = physics_enabled
         
-        if not nodes:
-            st.warning(f"No graph data returned from Neo4j Aura for FIPS `{active_fips}`. Make sure `ingest.py` has been executed.")
-        else:
-            # Build Pyvis Network
-            net = Network(height="650px", width="100%", bgcolor="#0f172a", font_color="#ffffff", heading="")
-            net.options.physics.enabled = physics_enabled
-            
-            # Configure BarnesHut physics for balanced layout
-            net.barnes_hut(
-                gravity=-8000,
-                central_gravity=0.3,
-                spring_length=150,
-                spring_strength=0.05,
-                damping=0.09
+        net.barnes_hut(
+            gravity=-8000,
+            central_gravity=0.3,
+            spring_length=150,
+            spring_strength=0.05,
+            damping=0.09
+        )
+        
+        for node in nodes:
+            net.add_node(
+                node['id'],
+                label=node['label'],
+                color=node['color'],
+                size=node['size'],
+                title=node['title']
             )
             
-            # Add nodes
-            for node in nodes:
-                net.add_node(
-                    node['id'],
-                    label=node['label'],
-                    color=node['color'],
-                    size=node['size'],
-                    title=node['title']
-                )
-                
-            # Add edges
-            for edge in edges:
-                net.add_edge(
-                    edge['from'],
-                    edge['to'],
-                    label=edge.get('label', ''),
-                    color=edge['color'],
-                    width=edge.get('width', 2),
-                    dashes=edge.get('dashes', False),
-                    title=edge.get('title', '')
-                )
-                
-            # Render HTML and display in Streamlit
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp_file:
-                net.save_graph(tmp_file.name)
-                tmp_file.seek(0)
-                html_content = tmp_file.read().decode('utf-8')
-                
-            components.html(html_content, height=680, scrolling=False)
+        for edge in edges:
+            net.add_edge(
+                edge['from'],
+                edge['to'],
+                label=edge.get('label', ''),
+                color=edge['color'],
+                width=edge.get('width', 2),
+                dashes=edge.get('dashes', False),
+                title=edge.get('title', '')
+            )
             
-            # Legend
-            st.markdown("""
-            **Node Legend:** 
-            🟣 **County** (Center) &nbsp;|&nbsp; 🔵 **State** &nbsp;|&nbsp; 🟢 **Low Risk / Protective SDoH** &nbsp;|&nbsp; 🟡 **Medium SDoH** &nbsp;|&nbsp; 🔴 **High Risk SDoH**
-            <br>
-            **Edge Legend:** 
-            ─── Colored Line: Direct SDoH Feature Impact (Showing raw value) &nbsp;|&nbsp; 🟦 Dashed Line: State Link
-            """, unsafe_allow_html=True)
-    else:
-        st.error("Neo4j driver is not connected. Please check your `.env` credentials.")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp_file:
+            net.save_graph(tmp_file.name)
+            tmp_file.seek(0)
+            html_content = tmp_file.read().decode('utf-8')
+            
+        components.html(html_content, height=680, scrolling=False)
+        
+        st.markdown("""
+        **Node Legend:** 
+        🟣 **County** (Center) &nbsp;|&nbsp; 🔵 **State** &nbsp;|&nbsp; 🟢 **Low Risk / Protective SDoH** &nbsp;|&nbsp; 🟡 **Medium SDoH** &nbsp;|&nbsp; 🔴 **High Risk SDoH**
+        <br>
+        **Edge Legend:** 
+        ─── Colored Line: Direct SDoH Feature Impact (Showing raw value) &nbsp;|&nbsp; 🟦 Dashed Line: State Link
+        """, unsafe_allow_html=True)
 
 with tab_sdoh:
-    st.markdown(f"#### 📊 SDoH Barriers Breakdown for {c_row['county_name']}")
+    st.markdown(f"#### 📊 SDoH Barriers Breakdown for {c_name}")
     
-    sdoh_display = [
-        ("Poverty Rate", c_row['poverty_rate'], "%", 15.1),
-        ("Unemployment Rate", c_row['unemployment_rate'], "%", 5.16),
-        ("No Vehicle Rate", c_row['no_vehicle_rate'], "%", 6.20),
-        ("Internet Subscription Rate", c_row['internet_subscription_rate'], "%", 82.5),
-        ("Lack of Health Insurance", c_row['lack_health_insurance'], "%", 11.57),
-        ("Food Insecurity", c_row['food_insecurity'], "%", 16.87),
-        ("Transportation Barrier", c_row['transportation_barrier'], "%", 9.23),
-        ("Housing Insecurity", c_row['housing_insecurity'], "%", 13.66),
-        ("Low Food Access Pct", c_row['low_access_population_pct_2019'], "%", 24.30),
-        ("SNAP Low Access Pct", c_row['snap_low_access_pct_2019'], "%", 7.89),
-        ("Grocery Store Density (per 1k)", c_row['grocery_stores_per_1000_2020'], "per 1k", 0.21),
-        ("Fast Food Density (per 1k)", c_row['fast_food_per_1000_2020'], "per 1k", 0.67)
-    ]
+    api_sdoh = fetch_sdoh_from_api(FASTAPI_URL, active_fips) if use_fastapi else None
     
-    sdoh_df = pd.DataFrame(sdoh_display, columns=["SDoH Barrier Factor", "County Value", "Unit", "US National Average"])
-    sdoh_df["Difference vs US Avg"] = sdoh_df["County Value"] - sdoh_df["US National Average"]
-    
+    if api_sdoh:
+        sdoh_df = pd.DataFrame(api_sdoh)
+        sdoh_df.rename(columns={
+            "factor_name": "SDoH Barrier Factor",
+            "county_value": "County Value",
+            "unit": "Unit",
+            "us_avg": "US National Average",
+            "difference": "Difference vs US Avg"
+        }, inplace=True)
+    else:
+        county_info = df_csv[df_csv['fips_str'] == active_fips]
+        c_row = county_info.iloc[0]
+        sdoh_display = [
+            ("Poverty Rate", c_row['poverty_rate'], "%", 15.1),
+            ("Unemployment Rate", c_row['unemployment_rate'], "%", 5.16),
+            ("No Vehicle Rate", c_row['no_vehicle_rate'], "%", 6.20),
+            ("Internet Subscription Rate", c_row['internet_subscription_rate'], "%", 82.5),
+            ("Lack of Health Insurance", c_row['lack_health_insurance'], "%", 11.57),
+            ("Food Insecurity", c_row['food_insecurity'], "%", 16.87),
+            ("Transportation Barrier", c_row['transportation_barrier'], "%", 9.23),
+            ("Housing Insecurity", c_row['housing_insecurity'], "%", 13.66),
+            ("Low Food Access Pct", c_row['low_access_population_pct_2019'], "%", 24.30),
+            ("SNAP Low Access Pct", c_row['snap_low_access_pct_2019'], "%", 7.89),
+            ("Grocery Store Density (per 1k)", c_row['grocery_stores_per_1000_2020'], "per 1k", 0.21),
+            ("Fast Food Density (per 1k)", c_row['fast_food_per_1000_2020'], "per 1k", 0.67)
+        ]
+        sdoh_df = pd.DataFrame(sdoh_display, columns=["SDoH Barrier Factor", "County Value", "Unit", "US National Average"])
+        sdoh_df["Difference vs US Avg"] = sdoh_df["County Value"] - sdoh_df["US National Average"]
+
     st.dataframe(sdoh_df.style.format({
         "County Value": "{:.2f}",
         "US National Average": "{:.2f}",
@@ -357,26 +465,38 @@ with tab_sdoh:
     }), use_container_width=True)
 
 with tab_health:
-    st.markdown(f"#### 🩺 Chronic Health Outcomes Prevalence for {c_row['county_name']}")
+    st.markdown(f"#### 🩺 Chronic Health Outcomes Prevalence for {c_name}")
     
-    health_display = [
-        ("Diabetes Prevalence", c_row['diabetes_prevalence'], 11.13),
-        ("Obesity Prevalence", c_row['obesity_prevalence'], 37.67),
-        ("High Blood Pressure Prevalence", c_row['high_bp_prevalence'], 33.48),
-        ("Physical Inactivity", c_row['physical_inactivity'], 26.98),
-        ("Smoking Prevalence", c_row['smoking_prevalence'], 16.32),
-        ("Heart Disease Prevalence", c_row['heart_disease_prevalence'], 5.97),
-        ("Poor Mental Health (14+ Days)", c_row['poor_mental_health'], 18.61),
-        ("Poor Physical Health (14+ Days)", c_row['poor_physical_health'], 13.82)
-    ]
-    
-    health_df = pd.DataFrame(health_display, columns=["Health Condition", "County Prevalence (%)", "US National Avg (%)"])
-    health_df["Difference vs US Avg (%)"] = health_df["County Prevalence (%)"] - health_df["US National Avg (%)"]
-    
+    api_health_outcomes = fetch_health_from_api(FASTAPI_URL, active_fips) if use_fastapi else None
+
+    if api_health_outcomes:
+        health_df = pd.DataFrame(api_health_outcomes)
+        health_df.rename(columns={
+            "condition_name": "Health Condition",
+            "county_prevalence": "County Prevalence (%)",
+            "us_avg": "US National Avg (%)",
+            "difference": "Difference vs US Avg (%)"
+        }, inplace=True)
+    else:
+        county_info = df_csv[df_csv['fips_str'] == active_fips]
+        c_row = county_info.iloc[0]
+        health_display = [
+            ("Diabetes Prevalence", c_row['diabetes_prevalence'], 11.13),
+            ("Obesity Prevalence", c_row['obesity_prevalence'], 37.67),
+            ("High Blood Pressure Prevalence", c_row['high_bp_prevalence'], 33.48),
+            ("Physical Inactivity", c_row['physical_inactivity'], 26.98),
+            ("Smoking Prevalence", c_row['smoking_prevalence'], 16.32),
+            ("Heart Disease Prevalence", c_row['heart_disease_prevalence'], 5.97),
+            ("Poor Mental Health (14+ Days)", c_row['poor_mental_health'], 18.61),
+            ("Poor Physical Health (14+ Days)", c_row['poor_physical_health'], 13.82)
+        ]
+        health_df = pd.DataFrame(health_display, columns=["Health Condition", "County Prevalence (%)", "US National Avg (%)"])
+        health_df["Difference vs US Avg (%)"] = health_df["County Prevalence (%)"] - health_df["US National Avg (%)"]
+
     st.dataframe(health_df.style.format({
         "County Prevalence (%)": "{:.2f}%",
         "US National Avg (%)": "{:.2f}%",
         "Difference vs US Avg (%)": "{:+.2f}%"
     }), use_container_width=True)
 
-st.caption("Powered by Neo4j Aura Graph Database & Streamlit | SDOH Knowledge Graph Project")
+st.caption("Powered by FastAPI REST API & Neo4j Aura Graph Database | SDOH Knowledge Graph Project")
