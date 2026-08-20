@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 # Database URL using user postgres and password 3513
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://postgres:3513@localhost:5432/CareEquity"
+    "postgresql://postgres:2004@localhost:5432/CareEquity"
 )
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
