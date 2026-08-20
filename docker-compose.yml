@@ -75,3 +75,56 @@ services:
       ocr-backend:
         condition: service_healthy
     restart: unless-stopped
+
+  kg-backend:
+    build:
+      context: ./kg
+      dockerfile: Dockerfile
+    container_name: careequity-kg-backend
+    ports:
+      - "8002:8000"
+    environment:
+      - NEO4J_URI=neo4j+s://8357afa1.databases.neo4j.io
+      - NEO4J_USERNAME=8357afa1
+      - NEO4J_PASSWORD=zY1Fk-hmxuF02rmC9M8aYLYAqfTj3-AvErXJObPJafE
+      - NEO4J_DATABASE=8357afa1
+      - AURA_INSTANCEID=8357afa1
+      - AURA_INSTANCENAME=Instance01
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - FASTAPI_URL=http://localhost:8002
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  kg-frontend:
+    build:
+      context: ./kg
+      dockerfile: Dockerfile.streamlit
+    container_name: careequity-kg-frontend
+    ports:
+      - "8502:8502"
+    environment:
+      - FASTAPI_URL=http://kg-backend:8000
+      - NEO4J_URI=neo4j+s://8357afa1.databases.neo4j.io
+      - NEO4J_USERNAME=8357afa1
+      - NEO4J_PASSWORD=zY1Fk-hmxuF02rmC9M8aYLYAqfTj3-AvErXJObPJafE
+      - NEO4J_DATABASE=8357afa1
+      - AURA_INSTANCEID=8357afa1
+      - AURA_INSTANCENAME=Instance01
+    depends_on:
+      kg-backend:
+        condition: service_healthy
+    restart: unless-stopped

@@ -61,7 +61,6 @@ st.markdown("""
 
 # --- DATA & API CLIENT FUNCTIONS ---
 
-@st.cache_data(ttl=60)
 def check_fastapi_health(api_url):
     """Checks if FastAPI backend server is online."""
     try:
@@ -291,6 +290,24 @@ physics_enabled = True
 st.title("Social Determinants of Health (SDoH) Knowledge Graph")
 st.markdown("Explore county-level socioeconomic barriers, infrastructure, food access, and chronic health outcomes powered by **FastAPI & Neo4j**.")
 
+# Zipcode mapping / lookup dictionary
+ZIP_TO_FIPS = {
+    # Sample US Zipcodes mapped to County FIPS for instant lookup
+    "36003": "1001", "36006": "1001", "36008": "1001", "36066": "1001", "36067": "1001", # Autauga County, AL
+    "36507": "1003", "36526": "1003", "36532": "1003", "36535": "1003", "36580": "1003", # Baldwin County, AL
+    "90001": "6037", "90012": "6037", "90210": "6037", "90401": "6037", "91101": "6037", # Los Angeles County, CA
+    "94102": "6075", "94103": "6075", "94107": "6075", "94110": "6075", # San Francisco, CA
+    "30301": "13121", "30303": "13121", "30305": "13121", "30309": "13121", # Fulton County, GA
+    "10001": "36061", "10002": "36061", "10011": "36061", "10019": "36061", # New York County, NY
+    "33101": "12086", "33139": "12086", "33140": "12086", # Miami-Dade County, FL
+    "60601": "17031", "60602": "17031", "60606": "17031", # Cook County, IL
+    "77001": "48201", "77002": "48201", "77004": "48201", # Harris County, TX
+    "98101": "53033", "98104": "53033", "98109": "53033", # King County, WA
+}
+
+if 'fips_selection' not in st.session_state:
+    st.session_state['fips_selection'] = "1001"
+
 # Selection Controls
 col_search1, col_search2 = st.columns([1, 2])
 
@@ -302,24 +319,46 @@ if api_counties:
 else:
     county_options = df_csv.apply(lambda r: f"{r['county_name']} ({r['fips_str']})", axis=1).tolist()
 
-default_idx = 0
+def on_input_change():
+    val = st.session_state.get('user_search_input', '').strip()
+    if val in ZIP_TO_FIPS:
+        st.session_state['fips_selection'] = ZIP_TO_FIPS[val]
+    elif val in df_csv['fips_str'].values:
+        st.session_state['fips_selection'] = val
+
+def on_dropdown_change():
+    selected_opt = st.session_state.get('user_dropdown_select', '')
+    if "(" in selected_opt and ")" in selected_opt:
+        extracted = selected_opt.split("(")[-1].replace(")", "").strip()
+        st.session_state['fips_selection'] = extracted
+
+# Calculate current dropdown index based on session state
+current_fips = st.session_state['fips_selection']
+matched_idx = 0
 for idx, opt in enumerate(county_options):
-    if "(1001)" in opt:
-        default_idx = idx
+    if f"({current_fips})" in opt:
+        matched_idx = idx
         break
 
 with col_search1:
-    input_fips = st.text_input("Enter County FIPS Code:", value="1001", help="e.g. 1001 for Autauga County, AL")
+    st.text_input(
+        "Enter FIPS or US Zipcode:",
+        value=current_fips,
+        key="user_search_input",
+        on_change=on_input_change,
+        help="Type a 5-digit US Zipcode (e.g., 90210) or 4-5 digit FIPS code (e.g., 1001)"
+    )
 
 with col_search2:
-    selected_county_option = st.selectbox("Or Select County by Name:", options=county_options, index=default_idx)
-    selected_fips_from_dropdown = selected_county_option.split("(")[-1].replace(")", "").strip()
+    st.selectbox(
+        "Or Select County by Name:",
+        options=county_options,
+        index=matched_idx,
+        key="user_dropdown_select",
+        on_change=on_dropdown_change
+    )
 
-# Resolve active FIPS code
-if input_fips != "1001" and input_fips in df_csv['fips_str'].values:
-    active_fips = input_fips
-else:
-    active_fips = selected_fips_from_dropdown
+active_fips = st.session_state['fips_selection']
 
 # Fetch County Overview Data
 api_overview = fetch_county_overview_from_api(FASTAPI_URL, active_fips) if use_fastapi else None
