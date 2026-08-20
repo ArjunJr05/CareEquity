@@ -2,8 +2,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults } from '../store/appState'
-import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL } from '../config'
+import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson } from '../store/appState'
+import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL } from '../config'
 import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
 const router = useRouter()
@@ -284,63 +284,147 @@ const steps = [
 // Testimonial avatar source
 import mitchellPhoto from '../assets/dr_sarah_mitchell.png'
 
+const ocrRawJson = ref(null)
+const ocrStatus = ref({ checking: false, healthy: null, message: '' })
+
+const checkOcrBackendHealth = async () => {
+  ocrStatus.value.checking = true
+  ocrStatus.value.healthy = null
+  ocrStatus.value.message = 'Testing OCR connection...'
+  try {
+    const res = await fetch(`${OCR_BACKEND_URL}/health`)
+    if (res.ok) {
+      const data = await res.json()
+      ocrStatus.value.healthy = true
+      ocrStatus.value.message = `OCR Backend Connected (${data.status || 'healthy'})`
+      showToast('OCR Service Online', `OCR backend on ${OCR_BACKEND_URL} is connected and ready!`)
+    } else {
+      throw new Error(`HTTP ${res.status}`)
+    }
+  } catch (err) {
+    ocrStatus.value.healthy = false
+    ocrStatus.value.message = 'OCR Backend Offline'
+    showToast('OCR Error', `Cannot connect to OCR backend on ${OCR_BACKEND_URL}. ${err.message}`)
+  } finally {
+    ocrStatus.value.checking = false
+  }
+}
+
 const uploadFileToOCR = async (file) => {
   isUploadingFile.value = true
   try {
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('file_format', 'patient_details')
     
-    const response = await fetch(`${SYSTEM_BACKEND_URL}/api/v1/ocr/upload`, {
+    let response = await fetch(`${OCR_BACKEND_URL}/extract?file_format=patient_details`, {
       method: 'POST',
       body: formData
     })
     
-    if (!response.ok) throw new Error('OCR upload failed: ' + response.status)
-    const result = await response.json()
-    
-    if (result.success && result.extracted_data) {
-      const data = result.extracted_data
-      
-      // Auto-populate demographics
-      if (data.demographics) {
-        if (data.demographics.patient_name) {
-          form.value.name = data.demographics.patient_name
-        }
-        if (data.demographics.age) {
-          form.value.age = data.demographics.age
-        }
-        if (data.demographics.gender) {
-          const g = data.demographics.gender.toLowerCase()
-          if (g.startsWith('f')) form.value.gender = 'Female'
-          else if (g.startsWith('m')) form.value.gender = 'Male'
-          else form.value.gender = 'Other'
-        }
-      }
-      
-      // Auto-populate vitals
-      if (data.vital_signs) {
-        if (data.vital_signs.height_cm) {
-          form.value.height_cm = Math.round(data.vital_signs.height_cm)
-        }
-        if (data.vital_signs.weight_kg) {
-          form.value.weight_kg = Math.round(data.vital_signs.weight_kg)
-        }
-      }
-      
-      // Auto-populate medical history
-      if (data.medical_history) {
-        if (data.medical_history.diabetes !== undefined && data.medical_history.diabetes !== null) {
-          form.value.diabetes = (data.medical_history.diabetes === true || data.medical_history.diabetes === 'Yes' || String(data.medical_history.diabetes).toLowerCase() === 'true') ? 'Yes' : 'No'
-        }
-        if (data.medical_history.hypertension !== undefined && data.medical_history.hypertension !== null) {
-          form.value.hypertension = (data.medical_history.hypertension === true || data.medical_history.hypertension === 'Yes' || String(data.medical_history.hypertension).toLowerCase() === 'true') ? 'Yes' : 'No'
-        }
-      }
-      
-      console.log('✓ Successfully populated form fields from OCR:', result)
+    if (!response.ok) {
+      console.warn('Primary OCR backend returned non-OK (' + response.status + '), trying fallback system backend...')
+      response = await fetch(`${SYSTEM_BACKEND_URL}/api/v1/ocr/upload`, {
+        method: 'POST',
+        body: formData
+      })
     }
+    
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`OCR upload failed (${response.status}): ${errText}`)
+    }
+    const result = await response.json()
+    ocrRawJson.value = result
+    setOcrExtractedJson(result)
+    
+    // Extract root dataset
+    const ext = result.data || result.extracted_data || result
+    
+    // 1. Patient Demographics & Info
+    const pInfo = ext.patient_info || ext.demographics || ext.patient || {}
+    
+    // Name (check name, patient_name, full_name)
+    const rawName = pInfo.name || pInfo.patient_name || pInfo.full_name || ext.name || ext.patient_name
+    if (rawName) {
+      form.value.name = String(rawName).trim()
+    }
+    
+    // Age (check age, patient_age)
+    const rawAge = pInfo.age || pInfo.patient_age || ext.age
+    if (rawAge) {
+      const parsedAge = parseInt(String(rawAge).replace(/[^0-9]/g, ''), 10)
+      if (!isNaN(parsedAge) && parsedAge > 0) form.value.age = parsedAge
+    }
+    
+    // Gender
+    const rawGender = pInfo.gender || pInfo.sex || ext.gender || ext.sex
+    if (rawGender) {
+      const g = String(rawGender).toLowerCase().trim()
+      if (g.startsWith('f') || g.includes('female')) form.value.gender = 'Female'
+      else if (g.startsWith('m') || g.includes('male')) form.value.gender = 'Male'
+      else form.value.gender = 'Other'
+    }
+
+    // 2. Vital Signs (Height / Weight)
+    const vSigns = ext.vital_signs || ext.vitals || ext
+    const rawHeight = vSigns.height || vSigns.height_cm || pInfo.height
+    if (rawHeight) {
+      const parsedH = parseFloat(String(rawHeight).replace(/[^0-9.]/g, ''))
+      if (!isNaN(parsedH) && parsedH > 0) form.value.height_cm = Math.round(parsedH)
+    }
+
+    const rawWeight = vSigns.weight || vSigns.weight_kg || pInfo.weight
+    if (rawWeight) {
+      const parsedW = parseFloat(String(rawWeight).replace(/[^0-9.]/g, ''))
+      if (!isNaN(parsedW) && parsedW > 0) form.value.weight_kg = Math.round(parsedW)
+    }
+
+    // 3. Clinical Context & Medical Conditions parsing (Diabetes, Hypertension, Heart Disease, Asthma)
+    const fullTextSearch = JSON.stringify(ext).toLowerCase()
+
+    // Diabetes
+    if (fullTextSearch.includes('diabetes') || fullTextSearch.includes('diabetic')) {
+      form.value.diabetes = 'Yes'
+    } else {
+      form.value.diabetes = 'No'
+    }
+
+    // Hypertension
+    if (fullTextSearch.includes('hypertension') || fullTextSearch.includes('high blood pressure') || fullTextSearch.includes('htn')) {
+      form.value.hypertension = 'Yes'
+    } else {
+      form.value.hypertension = 'No'
+    }
+
+    // Heart Disease
+    if (fullTextSearch.includes('heart disease') || fullTextSearch.includes('coronary') || fullTextSearch.includes('cardiac') || fullTextSearch.includes('cad')) {
+      form.value.heart_disease = 'Yes'
+    } else {
+      form.value.heart_disease = 'No'
+    }
+
+    // Asthma
+    if (fullTextSearch.includes('asthma') || fullTextSearch.includes('asthmatic')) {
+      form.value.asthma = 'Yes'
+    } else {
+      form.value.asthma = 'No'
+    }
+
+    let fieldsPopulated = false
+    if (pInfo.name || pInfo.patient_name || pInfo.age || pInfo.gender) {
+      fieldsPopulated = true
+    }
+
+    if (fieldsPopulated) {
+      showToast('OCR Complete', 'Document parsed! Patient fields populated.')
+    } else {
+      showToast('OCR Complete', 'Document processed! Raw OCR JSON is ready below. Please complete any blank fields.')
+    }
+    console.log('✓ Successfully processed OCR response:', result)
   } catch (err) {
     console.error('Failed uploading to OCR:', err)
+    showToast('OCR Error', err.message || 'Failed extracting OCR data. Please fill out details manually.')
   } finally {
     isUploadingFile.value = false
   }
@@ -825,9 +909,28 @@ const handleAnalyze = async () => {
       <!-- 2. Center Content panel -->
       <main class="center-content-panel">
         <div class="center-panel-wrapper">
-          <div style="margin-bottom: 20px;">
-            <h2 style="margin: 0; font-size: 1.25rem; font-weight: 800; color: var(--text-primary);">Select Data Source Template</h2>
-            <p class="form-sub" style="margin: 4px 0 0; font-size: 0.78rem; color: var(--text-secondary);">Choose a source below to open the data entry form, or view your history below.</p>
+          <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <h2 style="margin: 0; font-size: 1.25rem; font-weight: 800; color: var(--text-primary);">Select Data Source Template</h2>
+              <p class="form-sub" style="margin: 4px 0 0; font-size: 0.78rem; color: var(--text-secondary);">Choose a source below to open the data entry form, or view your history below.</p>
+            </div>
+
+            <!-- OCR Backend Status Test Button -->
+            <button 
+              @click="checkOcrBackendHealth" 
+              :disabled="ocrStatus.checking"
+              style="padding: 6px 14px; font-size: 0.78rem; font-weight: 600; border-radius: 8px; border: 1px solid #cbd5e1; background: #ffffff; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.15s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"
+              onmouseenter="this.style.borderColor='#94a3b8'; this.style.background='#f8fafc';"
+              onmouseleave="this.style.borderColor='#cbd5e1'; this.style.background='#ffffff';"
+            >
+              <span 
+                style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
+                :style="{
+                  background: ocrStatus.healthy === true ? '#22c55e' : (ocrStatus.healthy === false ? '#ef4444' : '#94a3b8')
+                }"
+              ></span>
+              <span>{{ ocrStatus.checking ? 'Testing OCR...' : 'Check OCR Backend Status' }}</span>
+            </button>
           </div>
 
           <!-- Template Cards Grid (Excel-like equal 5 boxes grid layout) -->
@@ -1051,6 +1154,24 @@ const handleAnalyze = async () => {
                 <IconBase name="sparkle" :size="16" /> Analyze Patient Risk & Generate Insights
               </button>
               <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
+            </div>
+
+            <!-- OCR Extracted JSON Display Panel -->
+            <div v-if="ocrRawJson" style="margin-top: 16px; background: #0f172a; border-radius: 10px; border: 1px solid #1e293b; overflow: hidden;">
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #10b981;"></span>
+                  <h4 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #f8fafc; font-family: monospace;">OCR Extracted JSON Response</h4>
+                </div>
+                <button 
+                  type="button" 
+                  @click="ocrRawJson = null"
+                  style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600;"
+                >
+                  ✕ Clear
+                </button>
+              </div>
+              <pre style="margin: 0; padding: 16px; max-height: 280px; overflow-y: auto; color: #38bdf8; font-size: 0.78rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.4; white-space: pre-wrap;">{{ JSON.stringify(ocrRawJson, null, 2) }}</pre>
             </div>
           </div>
 

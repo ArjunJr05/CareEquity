@@ -11,7 +11,27 @@ export default defineConfig({
     vueDevTools(),
   ],
   server: {
-    allowedHosts: true
+    allowedHosts: true,
+    proxy: {
+      '/docs': {
+        target: 'http://careequity-main-backend:8000',
+        changeOrigin: true,
+      },
+      '/openapi.json': {
+        target: 'http://careequity-main-backend:8000',
+        changeOrigin: true,
+      },
+      '/ocr-docs': {
+        target: 'http://careequity-ocr-backend:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ocr-docs/, '/docs')
+      },
+      '/ocr-openapi.json': {
+        target: 'http://careequity-ocr-backend:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ocr-openapi.json/, '/openapi.json')
+      }
+    }
   },
   resolve: {
     alias: {

@@ -6,6 +6,7 @@ export const showLoginScreen = ref(false)
 export const isAdmin = ref(localStorage.getItem('user_role') === 'admin')
 export const mlPredictionResults = ref(null)
 export const predictionModelResults = ref(null)
+export const ocrExtractedJson = ref(null)
 
 export const patientData = ref({
   name: '',
@@ -70,4 +71,8 @@ export function setMlPredictionResults(val) {
 
 export function setPredictionModelResults(val) {
   predictionModelResults.value = val
+}
+
+export function setOcrExtractedJson(val) {
+  ocrExtractedJson.value = val
 }
