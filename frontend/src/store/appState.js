@@ -22,6 +22,8 @@ export const patientData = ref({
   medication_adherence: 85,
 })
 
+export const userPlan = ref(localStorage.getItem('user_plan') || 'basic')
+
 export function setLoggedIn(val) {
   isLoggedIn.value = val
   localStorage.setItem('docpat_logged_in', val ? 'true' : 'false')
@@ -29,6 +31,11 @@ export function setLoggedIn(val) {
     isAdmin.value = false
     localStorage.removeItem('user_role')
   }
+}
+
+export function setUserPlan(plan) {
+  userPlan.value = plan
+  localStorage.setItem('user_plan', plan)
 }
 
 export function setAnalyzed(val) {
