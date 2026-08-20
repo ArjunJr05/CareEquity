@@ -23,6 +23,7 @@ const nav = computed(() => {
     { name: 'Community Resources', icon: 'hand-heart', gif: '/assets/community.gif', to: '/community-resources' },
     { name: 'Interventions', icon: 'bulb', gif: '/assets/idea.gif', to: '/interventions' },
     { name: 'Reports', icon: 'report', gif: '/assets/report.gif', to: '/reports' },
+    { name: 'Subscription Plan', icon: 'sparkle', gif: null, to: '/plan' },
   ]
 })
 </script>

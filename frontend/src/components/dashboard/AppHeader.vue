@@ -1,12 +1,24 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBase from './IconBase.vue'
-import { isLoggedIn, setLoggedIn, setShowLoginScreen } from '../../store/appState'
+import { isLoggedIn, setLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
 import { MAIN_BACKEND_URL } from '../../config'
+
+const router = useRouter()
 
 const userName = computed(() => {
   return localStorage.getItem('user_name') || 'Jane Smith'
 })
+
+const planBadgeText = computed(() => {
+  if (!userPlan.value) return 'BASIC Plan'
+  return `${userPlan.value.toUpperCase()} Plan`
+})
+
+const goToPlan = () => {
+  router.push('/plan')
+}
 
 const triggerLogin = () => {
   setShowLoginScreen(true)
@@ -38,15 +50,17 @@ const handleLogout = async () => {
 
 <template>
   <header class="topbar">
-    
-
     <div class="controls">
+      <button class="chip" @click="goToPlan" style="cursor: pointer; background: #eff6ff; border-color: #bfdbfe; color: #1d6bf3; font-weight: 600;" title="Manage Subscription Plan">
+        <IconBase name="sparkle" :size="15" />
+        {{ planBadgeText }}
+      </button>
+
       <button class="chip">
         <IconBase name="pin" :size="15" />
         United States
         <IconBase name="chevron-down" :size="14" />
       </button>
-
 
       <!-- If logged in, show user name and Sign Out -->
       <button v-if="isLoggedIn" class="user" @click="handleLogout" title="Click to Logout" style="cursor: pointer; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
@@ -113,6 +127,22 @@ const handleLogout = async () => {
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
+}
+
+@keyframes iconSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chip:hover :deep(svg),
+.chip:hover svg,
+.btn-login-trigger:hover :deep(svg),
+.btn-login-trigger:hover svg {
+  animation: iconSpin 3.5s linear infinite;
 }
 
 .chip:hover {
