@@ -46,6 +46,8 @@ services:
       - "8001:8000"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./ocr/src:/app/src
     restart: unless-stopped
     healthcheck:
       test:

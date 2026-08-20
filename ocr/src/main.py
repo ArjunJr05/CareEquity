@@ -262,21 +262,21 @@ async def extract_from_document(
         high_confidence = sum(
             1
             for item in metadata
-            if (item.confidence.value if hasattr(item.confidence, "value") else str(item.confidence)) == "high"
+            if item.confidence.value == "high"
         )
 
 
         medium_confidence = sum(
             1
             for item in metadata
-            if (item.confidence.value if hasattr(item.confidence, "value") else str(item.confidence)) == "medium"
+            if item.confidence.value == "medium"
         )
 
 
         low_confidence = sum(
             1
             for item in metadata
-            if (item.confidence.value if hasattr(item.confidence, "value") else str(item.confidence)) == "low"
+            if item.confidence.value == "low"
         )
 
 
