@@ -68,7 +68,7 @@ def save_assessment_history(
 
 
 # ---------------------------------------------------------
-# GET ALL HISTORY FOR ONE USER
+# GET ALL HISTORY FOR ONE SPECIFIC USER
 # ---------------------------------------------------------
 
 @router.get(
@@ -81,12 +81,34 @@ def get_user_history(
 ):
     history = (
         db.query(AssessmentHistory)
+        .filter(AssessmentHistory.user_id == user_id)
         .order_by(
             AssessmentHistory.timestamp.desc()
         )
         .all()
     )
     return history
+
+
+@router.get(
+    "/email/{email:path}",
+    response_model=list[AssessmentHistoryResponse]
+)
+def get_history_by_email(
+    email: str,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        history = (
+            db.query(AssessmentHistory)
+            .filter(AssessmentHistory.user_id == user.id)
+            .order_by(AssessmentHistory.timestamp.desc())
+            .all()
+        )
+        return history
+
+    return []
 
 
 # ---------------------------------------------------------

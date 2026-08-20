@@ -6,7 +6,8 @@ from .models.user import User
 from .models.patient import Patient
 from .models.audit_log import AuditLog
 from .models.assessment_history import AssessmentHistory
-from .api.routes import patients, auth, admin, history, payments
+from .models.subscription import Subscription
+from .api.routes import patients, auth, admin, history, payments, subscriptions
 
 # Create tables in the CareEquity database if they don't exist
 Base.metadata.create_all(bind=engine)
@@ -39,10 +40,12 @@ app.add_middleware(
 
 # Mount API routers
 app.include_router(patients.router, prefix="/api")
+app.include_router(patients.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
+app.include_router(subscriptions.router, prefix="/api")
 
 @app.get("/")
 def read_root():
@@ -51,3 +54,7 @@ def read_root():
         "service": "CareEquity Backend API",
         "database": "Connected"
     }
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}

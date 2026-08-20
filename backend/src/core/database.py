@@ -10,6 +10,7 @@ load_dotenv()
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", 
     "postgresql://postgres:3513@localhost:5432/careequity"
+
 )
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
