@@ -1087,22 +1087,6 @@ const handleAnalyze = async () => {
               <p class="form-sub" style="margin: 4px 0 0; font-size: 0.78rem; color: var(--text-secondary);">Choose a source below to open the data entry form, or view your history below.</p>
             </div>
 
-            <!-- OCR Backend Status Test Button -->
-            <button 
-              @click="checkOcrBackendHealth" 
-              :disabled="ocrStatus.checking"
-              style="padding: 6px 14px; font-size: 0.78rem; font-weight: 600; border-radius: 8px; border: 1px solid #cbd5e1; background: #ffffff; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.15s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"
-              onmouseenter="this.style.borderColor='#94a3b8'; this.style.background='#f8fafc';"
-              onmouseleave="this.style.borderColor='#cbd5e1'; this.style.background='#ffffff';"
-            >
-              <span 
-                style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
-                :style="{
-                  background: ocrStatus.healthy === true ? '#22c55e' : (ocrStatus.healthy === false ? '#ef4444' : '#94a3b8')
-                }"
-              ></span>
-              <span>{{ ocrStatus.checking ? 'Testing OCR...' : 'Check OCR Backend Status' }}</span>
-            </button>
           </div>
 
           <!-- Template Cards Grid (Excel-like equal 5 boxes grid layout) -->
@@ -1328,41 +1312,8 @@ const handleAnalyze = async () => {
               <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
             </div>
 
-            <!-- Consolidated Unified JSON Display Panel -->
-            <div style="margin-top: 16px; background: #0f172a; border-radius: 10px; border: 1px solid #1e293b; overflow: hidden;">
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #6366f1;"></span>
-                  <h4 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #f8fafc; font-family: monospace;">Consolidated Patient & Location JSON</h4>
-                </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600; font-family: monospace;">Locations: {{ form.locations.length }}</span>
-                  <button 
-                    v-if="ocrRawJson"
-                    type="button" 
-                    @click="ocrRawJson = null"
-                    style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600;"
-                  >
-                    ✕ Clear OCR
-                  </button>
-                </div>
-              </div>
-              <pre style="margin: 0; padding: 16px; max-height: 320px; overflow-y: auto; color: #38bdf8; font-size: 0.78rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.4; white-space: pre-wrap;">{{ JSON.stringify({
-                patient_data: {
-                  name: form.name,
-                  age: form.age,
-                  gender: form.gender,
-                  diabetes: form.diabetes,
-                  hypertension: form.hypertension,
-                  heart_disease: form.heart_disease,
-                  asthma: form.asthma,
-                  height_cm: form.height_cm,
-                  weight_kg: form.weight_kg
-                },
-                target_locations: form.locations.map(loc => [loc.county || '', loc.state || '', loc.country || '']),
-                ocr_extracted_response: ocrRawJson || null
-              }, null, 2) }}</pre>
-            </div>
+           
+            
           </div>
 
           <!-- Assessment History Section (Higher container with Excel-style subtabs) -->
