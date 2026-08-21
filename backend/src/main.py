@@ -19,6 +19,8 @@ if engine:
             conn.execute(text("ALTER TABLE assessment_history ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;"))
             conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS height_cm FLOAT DEFAULT 170.0;"))
             conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS weight_kg FLOAT DEFAULT 70.0;"))
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS tokens_allocated INTEGER DEFAULT 250000;"))
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0;"))
             conn.commit()
     except Exception as migration_err:
         print("Database startup initialization note:", migration_err)

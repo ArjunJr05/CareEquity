@@ -175,6 +175,7 @@ class ChatResponse(BaseModel):
     answer:       str
     intent:       str   # "risk" | "care" | "mixed" | "greeting" | "fips_lookup" | "county_info"
     sources_used: int   # number of PubMed articles cited
+    tokens_used:  int = 0  # estimated / actual LLM token consumption
 
 
 # --- API ENDPOINTS ---
@@ -659,7 +660,7 @@ def chat_with_bot(req: ChatRequest):
 
     # Call the bot
     try:
-        answer, _ = ask_bot(
+        answer, _, tokens_used = ask_bot(
             user_question  = question,
             county_context = ctx,
             chat_history   = req.chat_history,
@@ -682,4 +683,5 @@ def chat_with_bot(req: ChatRequest):
         answer       = answer,
         intent       = intent,
         sources_used = sources_used,
+        tokens_used  = tokens_used,
     )

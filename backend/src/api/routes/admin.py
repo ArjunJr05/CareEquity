@@ -475,6 +475,8 @@ DEFAULT_PLANS = [
 ]
 
 def ensure_plans_seeded(db: Session):
+    if db is None:
+        return []
     existing = db.query(PlanConfig).all()
     if not existing:
         for p in DEFAULT_PLANS:

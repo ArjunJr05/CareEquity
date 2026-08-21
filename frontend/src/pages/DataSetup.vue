@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, setMlInputPayload, currentUserName, logoutUser, userPlan, syncUserSubscription } from '../store/appState'
+import { setAnalyzed, setPatientData, setLocationRecords, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, setMlInputPayload, currentUserName, logoutUser, userPlan, syncUserSubscription } from '../store/appState'
 import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL } from '../config'
 import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
@@ -111,6 +111,8 @@ const viewHistoryItem = (item) => {
       county: item.county || item.extra_data?.county || 'Cuyahoga County',
       state: item.state || item.extra_data?.state || 'OH'
     })
+    const historyLocations = item.extra_data?.all_locations || (item.extra_data?.locations_list ? item.extra_data.locations_list.map(l => ({ county: l[0], state: l[1], country: l[2] || 'United States' })) : [{ county: item.county || item.extra_data?.county || 'Cuyahoga County', state: item.state || item.extra_data?.state || 'Ohio', country: 'United States' }])
+    setLocationRecords(historyLocations)
     if (item.extra_data?.ml_prediction || item.ml_prediction) {
       setMlPredictionResults(item.extra_data?.ml_prediction || item.ml_prediction)
     }
@@ -592,6 +594,7 @@ const handleAnalyze = async () => {
     ...form.value,
     locations_list: locationsListOfLists
   })
+  setLocationRecords(form.value.locations)
 
   // Start analysis animation sequence
   isAnalyzing.value = true

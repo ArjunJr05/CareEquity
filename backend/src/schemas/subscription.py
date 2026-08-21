@@ -17,6 +17,8 @@ class SubscriptionResponse(BaseModel):
     subscribe: bool
     plan: str
     validity: str
+    tokens_allocated: int = 250000
+    tokens_used: int = 0
     subscribed_at: datetime
 
     class Config:
