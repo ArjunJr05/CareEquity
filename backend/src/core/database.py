@@ -9,8 +9,7 @@ load_dotenv()
 # Database URL using user postgres
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://postgres:3513@localhost:5432/careequity"
-
+    "postgresql://postgres:latharamanan%402005@localhost:5432/careequity"
 )
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)

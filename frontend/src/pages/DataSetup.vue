@@ -2,14 +2,19 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson } from '../store/appState'
+import { setAnalyzed, setPatientData, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, currentUserName, logoutUser, userPlan, syncUserSubscription } from '../store/appState'
 import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL } from '../config'
 import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
 const router = useRouter()
 
 const userName = computed(() => {
-  return localStorage.getItem('user_name') || 'Jane Smith'
+  return currentUserName.value || localStorage.getItem('user_name') || 'Jane Smith'
+})
+
+const planBadgeText = computed(() => {
+  if (!userPlan.value) return 'Choose Plan'
+  return `${userPlan.value.toUpperCase()} Plan`
 })
 
 const triggerLogin = () => {
@@ -17,26 +22,7 @@ const triggerLogin = () => {
 }
 
 const handleLogout = async () => {
-  const storedEmail = localStorage.getItem('user_email')
-  try {
-    await fetch(`${MAIN_BACKEND_URL}/api/auth/logout`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: storedEmail || '',
-        password: '' // empty password, backend will set status to false
-      })
-    })
-  } catch (err) {
-    console.error('Logout error:', err)
-  }
-  
-  localStorage.removeItem('docpat_logged_in')
-  localStorage.removeItem('user_email')
-  localStorage.removeItem('user_name')
-  setLoggedIn(false)
+  await logoutUser(MAIN_BACKEND_URL)
 }
 
 // Assessment History State
@@ -56,8 +42,8 @@ const fetchUserHistory = async () => {
     const userId = localStorage.getItem('user_id') || 1
     
     const fetchUrl = userEmail 
-      ? `${MAIN_BACKEND_URL}/api/history/email/${encodeURIComponent(userEmail)}`
-      : `${MAIN_BACKEND_URL}/api/history/user/${userId}`
+      ? `${MAIN_BACKEND_URL}/api/history/email/${encodeURIComponent(userEmail.trim().toLowerCase())}`
+      : `${MAIN_BACKEND_URL}/api/history/user/${userId || 1}`
       
     const res = await fetch(fetchUrl)
     if (res.ok) {
@@ -73,6 +59,7 @@ const fetchUserHistory = async () => {
 
 watch(isLoggedIn, (newVal) => {
   if (newVal) {
+    syncUserSubscription(MAIN_BACKEND_URL)
     fetchUserHistory()
   } else {
     userHistory.value = []
@@ -100,6 +87,7 @@ const displayedHistory = computed(() => {
 })
 
 onMounted(() => {
+  syncUserSubscription(MAIN_BACKEND_URL)
   if (isLoggedIn.value) {
     fetchUserHistory()
   }
@@ -569,8 +557,13 @@ const handleAnalyze = async () => {
     // Unconditionally save to /api/history/save database table
     try {
       const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
+      const storedEmail = localStorage.getItem('user_email')
+      const storedId = localStorage.getItem('user_id')
+      const currentUserId = storedId ? parseInt(storedId) : null
+
       const historyPayload = {
-        user_id: 1,
+        user_id: currentUserId,
+        user_email: storedEmail,
         name: form.value.name,
         age: parseInt(form.value.age) || 45,
         gender: form.value.gender,
@@ -713,8 +706,13 @@ const handleAnalyze = async () => {
     if (isLoggedIn.value) {
       try {
         const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
+        const storedEmail = localStorage.getItem('user_email')
+        const storedId = localStorage.getItem('user_id')
+        const currentUserId = storedId ? parseInt(storedId) : null
+
         const historyPayload = {
-          user_id: 1,
+          user_id: currentUserId,
+          user_email: storedEmail,
           name: form.value.name,
           age: parseInt(form.value.age) || 45,
           gender: form.value.gender,
@@ -842,7 +840,18 @@ const handleAnalyze = async () => {
         <img src="/assets/careequity_logo.png" style="height: 45px; object-fit: contain;" alt="CareEquity Logo" />
         <img src="/assets/careequity_name.png" style="height: 60px; object-fit: contain;" alt="CareEquity" />
       </div>
-      <div class="nav-right" style="display: flex; align-items: center; gap: 16px;">
+      <div class="nav-right" style="display: flex; align-items: center; gap: 12px;">
+        <!-- Subscription plan badge -->
+        <button 
+          class="chip chip-plan" 
+          :class="{ 'chip-no-plan': !userPlan }"
+          @click="router.push('/plan')" 
+          :title="userPlan ? 'Current Subscription Plan' : 'Click to Choose a Plan'"
+        >
+          <IconBase name="sparkle" :size="15" class="sparkle-icon" />
+          <span>{{ planBadgeText }}</span>
+        </button>
+
         <!-- If logged in, show user name and Sign Out -->
         <button v-if="isLoggedIn" class="user-chip-btn" @click="handleLogout" title="Click to Logout" style="cursor: pointer; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-primary); transition: background-color .15s ease;">
           <span style="font-size: 0.85rem; font-weight: 600;">{{ userName }}</span>
@@ -2100,6 +2109,49 @@ const handleAnalyze = async () => {
 .tpl-card-item:hover img {
   transform: scale(1.1);
   transition: transform 0.2s ease;
+}
+
+/* Subscription Plan Chip */
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chip-plan {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d6bf3;
+}
+
+.chip-plan.chip-no-plan {
+  background: #f8fafc;
+  border: 1.5px dashed #3b82f6;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.chip-plan:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+
+.chip-plan:hover .sparkle-icon,
+.chip-plan:hover :deep(.sparkle-icon) {
+  animation: iconSpin 3.5s linear infinite;
+}
+
+@keyframes iconSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Toast Vue Animation */

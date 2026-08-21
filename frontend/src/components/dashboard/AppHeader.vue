@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from './IconBase.vue'
-import { isLoggedIn, isAdmin, setLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
+import { isLoggedIn, isAdmin, setLoggedIn, setShowLoginScreen, userPlan, currentUserName, logoutUser } from '../../store/appState'
 import { MAIN_BACKEND_URL } from '../../config'
 
 const router = useRouter()
@@ -12,11 +12,11 @@ const isCurrentRouteAdmin = computed(() => {
 })
 
 const userName = computed(() => {
-  return localStorage.getItem('user_name') || (isAdmin.value ? 'Admin User' : 'Jane Smith')
+  return currentUserName.value || localStorage.getItem('user_name') || (isAdmin.value ? 'Admin User' : 'Jane Smith')
 })
 
 const planBadgeText = computed(() => {
-  if (!userPlan.value) return 'BASIC Plan'
+  if (!userPlan.value) return 'Choose Plan'
   return `${userPlan.value.toUpperCase()} Plan`
 })
 
@@ -29,26 +29,7 @@ const triggerLogin = () => {
 }
 
 const handleLogout = async () => {
-  const storedEmail = localStorage.getItem('user_email')
-  try {
-    await fetch(`${MAIN_BACKEND_URL}/api/auth/logout`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: storedEmail || '',
-        password: '' // empty password, backend will set status to false
-      })
-    })
-  } catch (err) {
-    console.error('Logout error:', err)
-  }
-  
-  localStorage.removeItem('docpat_logged_in')
-  localStorage.removeItem('user_email')
-  localStorage.removeItem('user_name')
-  setLoggedIn(false)
+  await logoutUser(MAIN_BACKEND_URL)
 }
 </script>
 
@@ -56,9 +37,15 @@ const handleLogout = async () => {
   <header class="topbar">
     <div class="controls">
       <!-- Subscription plan badge (hidden for admin) -->
-      <button v-if="!isCurrentRouteAdmin" class="chip chip-plan" @click="goToPlan" style="cursor: pointer; background: #eff6ff; border-color: #bfdbfe; color: #1d6bf3; font-weight: 600;" title="Manage Subscription Plan">
+      <button 
+        v-if="!isCurrentRouteAdmin" 
+        class="chip chip-plan" 
+        :class="{ 'chip-no-plan': !userPlan }"
+        @click="goToPlan" 
+        :title="userPlan ? 'Current Subscription Plan' : 'Click to Choose a Plan'"
+      >
         <IconBase name="sparkle" :size="15" class="sparkle-icon" />
-        {{ planBadgeText }}
+        <span>{{ planBadgeText }}</span>
       </button>
 
       <button class="chip chip-location">
@@ -141,6 +128,28 @@ const handleLogout = async () => {
   to {
     transform: rotate(360deg);
   }
+}
+
+.chip-plan {
+  cursor: pointer;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d6bf3;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.chip-plan.chip-no-plan {
+  background: #f8fafc;
+  border: 1.5px dashed #3b82f6;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.chip-plan.chip-no-plan:hover {
+  background: #eff6ff;
+  border-style: solid;
+  transform: translateY(-1px);
 }
 
 .chip-plan:hover .sparkle-icon,

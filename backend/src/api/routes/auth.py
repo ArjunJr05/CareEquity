@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+from typing import Optional
 import random
 
 from ...core.database import get_db
 from ...models.user import User
 from ...models.audit_log import AuditLog
-from ...schemas.user import UserCreate, UserLogin, UserResponse, OTPVerify
+from ...schemas.user import UserCreate, UserLogin, UserResponse, OTPVerify, UserLogout
 from ...core.security import get_password_hash, verify_password
 from ...core.email import send_otp_email
 
@@ -156,26 +157,21 @@ def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
-@router.post("/logout", response_model=UserResponse)
-def logout_user(credentials: UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == credentials.email).first()
-    if not db_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found."
-        )
-    db_user.status = False
-    
-    # Log successful logout
-    db_log = AuditLog(
-        event="User Logout",
-        user=db_user.email,
-        ip_address="127.0.0.1",
-        category="auth",
-        status="success"
-    )
-    db.add(db_log)
-
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+@router.post("/logout")
+def logout_user(payload: Optional[UserLogout] = None, db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    if payload and payload.email:
+        clean_email = payload.email.strip().lower()
+        db_user = db.query(User).filter(func.lower(User.email) == clean_email).first()
+        if db_user:
+            db_user.status = False
+            db_log = AuditLog(
+                event="User Logout",
+                user=db_user.email,
+                ip_address="127.0.0.1",
+                category="auth",
+                status="success"
+            )
+            db.add(db_log)
+            db.commit()
+    return {"status": "success", "message": "Logged out successfully"}

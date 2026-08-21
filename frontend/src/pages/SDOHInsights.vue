@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Network } from 'vis-network/standalone'
 
 const API_BASE = 'http://localhost:8002'
@@ -10,6 +10,11 @@ const selectedFips = ref('1001')
 const searchInput = ref('1001')
 const loading = ref(false)
 const error = ref(null)
+
+// Custom Searchable Dropdown State
+const isDropdownOpen = ref(false)
+const searchQuery = ref('')
+const dropdownRef = ref(null)
 
 const overview = ref({
   county_name: 'Autauga County',
@@ -39,6 +44,45 @@ const ZIP_TO_FIPS = {
   "60601": "17031", "60602": "17031", "60606": "17031",
   "77001": "48201", "77002": "48201", "77004": "48201",
   "98101": "53033", "98104": "53033", "98109": "53033",
+}
+
+// Current Selected County Object
+const selectedCountyObj = computed(() => {
+  const found = counties.value.find(c => String(c.fips) === String(selectedFips.value))
+  if (found) return found
+  return {
+    fips: selectedFips.value,
+    county_name: overview.value.county_name || 'Autauga County',
+    state_abbr: overview.value.state_abbr || 'AL',
+    display_label: `${overview.value.county_name || 'Autauga County'}, ${overview.value.state_abbr || 'AL'} (${selectedFips.value})`
+  }
+})
+
+// Search Filtering across Name, State, and FIPS (Shows all counties/places)
+const filteredCounties = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) {
+    return counties.value
+  }
+  return counties.value.filter(c => {
+    const name = (c.county_name || '').toLowerCase()
+    const state = (c.state_abbr || '').toLowerCase()
+    const fips = String(c.fips || '').toLowerCase()
+    const label = (c.display_label || '').toLowerCase()
+    return name.includes(q) || state.includes(q) || fips.includes(q) || label.includes(q)
+  })
+})
+
+const selectCounty = (county) => {
+  selectedFips.value = String(county.fips)
+  isDropdownOpen.value = false
+  searchQuery.value = ''
+}
+
+const handleClickOutside = (e) => {
+  if (dropdownRef.value && !dropdownRef.value.contains(e.target)) {
+    isDropdownOpen.value = false
+  }
 }
 
 // Fetch list of counties for dropdown
@@ -158,20 +202,6 @@ const renderNetworkGraph = () => {
   }, 400)
 }
 
-// Handlers
-const handleSearchInput = () => {
-  const val = searchInput.value.trim()
-  if (ZIP_TO_FIPS[val]) {
-    selectedFips.value = ZIP_TO_FIPS[val]
-  } else if (val.length >= 4) {
-    selectedFips.value = val
-  }
-}
-
-const handleSelectChange = () => {
-  searchInput.value = selectedFips.value
-}
-
 watch(selectedFips, (newFips) => {
   loadCountyData(newFips)
 })
@@ -185,8 +215,13 @@ watch(activeTab, (newTab) => {
 })
 
 onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
   fetchCounties()
   loadCountyData(selectedFips.value)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -195,32 +230,104 @@ onMounted(() => {
     <!-- Top Header -->
     <header class="header-section">
       <div class="header-titles">
-        <h2>SDoH Knowledge Graph Insights</h2>
+        <h2>SDOH Knowledge Graph Insights</h2>
         <p>Direct Native Vue.js Interface connected to FastAPI & Neo4j Aura</p>
       </div>
 
-      <!-- Controls Row: Select + Action -->
+      <!-- Controls Row: Searchable Custom Dropdown + Action -->
       <div class="search-controls-bar">
-        <div class="control-group flex-2">
-          <label>Select County by Name, FIPS, or Zipcode:</label>
-          <select 
-            v-model="selectedFips" 
-            @change="handleSelectChange"
-            class="select-field"
-          >
-            <option 
-              v-for="c in counties" 
-              :key="c.fips" 
-              :value="c.fips"
+        <div class="control-group flex-2" ref="dropdownRef">
+          <label class="control-label">
+            <span class="label-icon">📍</span>
+            <span>Select County by Name, FIPS, or Zipcode</span>
+          </label>
+
+          <div class="county-searchable-dropdown">
+            <!-- Dropdown Trigger Button -->
+            <button 
+              type="button" 
+              class="dropdown-trigger-box" 
+              :class="{ open: isDropdownOpen }"
+              @click.stop="isDropdownOpen = !isDropdownOpen"
             >
-              {{ c.display_label }}
-            </option>
-            <option v-if="!counties.length" value="1001">Autauga County, AL (1001)</option>
-          </select>
+              <div class="trigger-selected-info">
+                <div class="pin-badge">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                  </svg>
+                </div>
+                <span class="county-name-main">{{ selectedCountyObj.county_name }}</span>
+                <span class="state-pill">{{ selectedCountyObj.state_abbr }}</span>
+                <span class="fips-tag">FIPS {{ selectedCountyObj.fips }}</span>
+              </div>
+
+              <div class="dropdown-chevron-box" :class="{ rotated: isDropdownOpen }">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+            </button>
+
+            <!-- Dropdown Menu Popover -->
+            <Transition name="dropdown-pop">
+              <div v-if="isDropdownOpen" class="county-dropdown-popover" @click.stop>
+                <!-- Search Box Inside Dropdown -->
+                <div class="dropdown-search-wrapper">
+                  <svg class="search-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input 
+                    v-model="searchQuery" 
+                    type="text" 
+                    class="dropdown-search-input"
+                    placeholder="Search by county name, state, or FIPS code..."
+                    autofocus
+                  />
+                  <button v-if="searchQuery" @click="searchQuery = ''" class="clear-search-btn" type="button">✕</button>
+                </div>
+
+                <!-- Scrollable Counties List -->
+                <div class="counties-options-list">
+                  <div 
+                    v-for="c in filteredCounties" 
+                    :key="c.fips"
+                    class="county-option-row"
+                    :class="{ active: String(c.fips) === String(selectedFips) }"
+                    @click="selectCounty(c)"
+                  >
+                    <div class="option-left">
+                      <span class="option-county-name">{{ c.county_name }}</span>
+                      <span class="option-state-badge">{{ c.state_abbr }}</span>
+                    </div>
+                    <div class="option-right">
+                      <span class="option-fips-pill">FIPS {{ c.fips }}</span>
+                      <span v-if="String(c.fips) === String(selectedFips)" class="active-check">✓</span>
+                    </div>
+                  </div>
+
+                  <div v-if="!filteredCounties.length" class="no-counties-found">
+                    <span class="no-found-icon">🔍</span>
+                    <span>No counties match "<b>{{ searchQuery }}</b>"</span>
+                  </div>
+                </div>
+
+                <!-- Footer Counter -->
+                <div class="dropdown-footer-tip">
+                  <span>Showing {{ filteredCounties.length }} of {{ counties.length || 3143 }} US counties</span>
+                </div>
+              </div>
+            </Transition>
+          </div>
         </div>
 
         <button @click="loadCountyData(selectedFips)" class="btn-analyze">
-          Analyze Graph
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <span>Analyze Graph</span>
         </button>
       </div>
     </header>
@@ -234,27 +341,100 @@ onMounted(() => {
         <button @click="loadCountyData(selectedFips)" class="btn-retry">Retry Connection</button>
       </div>
 
-      <!-- Overview KPI Cards -->
+      <!-- Overview KPI Cards Grid -->
       <div v-else class="kpi-grid">
-        <div class="kpi-card">
-          <span class="lbl">County Name</span>
-          <span class="val">{{ overview.county_name }}</span>
+        <!-- 1. County Name -->
+        <div class="kpi-card border-accent-indigo">
+          <div class="kpi-card-head">
+            <div class="kpi-icon-box bg-indigo-light">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+            <span class="lbl">County Name</span>
+          </div>
+          <div class="val county-val-text">{{ overview.county_name }}</div>
+          <div class="kpi-sub-tag">Target Region</div>
         </div>
-        <div class="kpi-card">
-          <span class="lbl">State</span>
-          <span class="val">{{ overview.state_abbr }}</span>
+
+        <!-- 2. State -->
+        <div class="kpi-card border-accent-blue">
+          <div class="kpi-card-head">
+            <div class="kpi-icon-box bg-blue-light">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                <line x1="8" y1="2" x2="8" y2="18"></line>
+                <line x1="16" y1="6" x2="16" y2="22"></line>
+              </svg>
+            </div>
+            <span class="lbl">State</span>
+          </div>
+          <div class="val">
+            <span class="kpi-state-pill">{{ overview.state_abbr }}</span>
+          </div>
+          <div class="kpi-sub-tag">United States</div>
         </div>
-        <div class="kpi-card">
-          <span class="lbl">Population</span>
-          <span class="val">{{ overview.population ? overview.population.toLocaleString() : 'N/A' }}</span>
+
+        <!-- 3. Population -->
+        <div class="kpi-card border-accent-emerald">
+          <div class="kpi-card-head">
+            <div class="kpi-icon-box bg-emerald-light">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </div>
+            <span class="lbl">Population</span>
+          </div>
+          <div class="val">{{ overview.population ? overview.population.toLocaleString() : 'N/A' }}</div>
+          <div class="kpi-sub-tag">Total Residents</div>
         </div>
-        <div class="kpi-card">
-          <span class="lbl">Median Income</span>
-          <span class="val">{{ overview.median_household_income ? '$' + overview.median_household_income.toLocaleString() : 'N/A' }}</span>
+
+        <!-- 4. Median Income -->
+        <div class="kpi-card border-accent-teal">
+          <div class="kpi-card-head">
+            <div class="kpi-icon-box bg-teal-light">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              </svg>
+            </div>
+            <span class="lbl">Median Income</span>
+          </div>
+          <div class="val">{{ overview.median_household_income ? '$' + overview.median_household_income.toLocaleString() : 'N/A' }}</div>
+          <div class="kpi-sub-tag">Household Avg / Yr</div>
         </div>
-        <div class="kpi-card">
-          <span class="lbl">SVI Score (Overall)</span>
-          <span class="val highlight">{{ overview.svi_overall ? overview.svi_overall.toFixed(4) : 'N/A' }}</span>
+
+        <!-- 5. SVI Score -->
+        <div class="kpi-card border-accent-orange">
+          <div class="kpi-card-head">
+            <div class="kpi-icon-box bg-amber-light">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+            </div>
+            <span class="lbl">SVI Score (Overall)</span>
+          </div>
+          <div class="val">
+            <span 
+              class="svi-score-badge"
+              :class="{
+                'svi-high': overview.svi_overall >= 0.75,
+                'svi-mod': overview.svi_overall >= 0.5 && overview.svi_overall < 0.75,
+                'svi-low': overview.svi_overall < 0.5
+              }"
+            >
+              {{ overview.svi_overall ? overview.svi_overall.toFixed(4) : 'N/A' }}
+            </span>
+          </div>
+          <div class="kpi-sub-tag">
+            <span v-if="overview.svi_overall >= 0.75" class="text-risk-high">High Vulnerability</span>
+            <span v-else-if="overview.svi_overall >= 0.5" class="text-risk-mod">Moderate Vulnerability</span>
+            <span v-else class="text-risk-low">Low Vulnerability</span>
+          </div>
         </div>
       </div>
 
@@ -278,7 +458,10 @@ onMounted(() => {
         <!-- SDoH Socioeconomic Risk Factors -->
         <div class="data-table-card">
           <div class="table-card-header">
-            <h3>📊 SDoH Risk Factors</h3>
+            <h3 class="table-header-title">
+              <img src="/assets/warning.png" alt="SDOH Risk Factors" class="section-title-icon" />
+              <span>SDOH Risk Factors</span>
+            </h3>
             <p>County-level socioeconomic drivers vs. US National average</p>
           </div>
           <table class="custom-table">
@@ -306,7 +489,10 @@ onMounted(() => {
         <!-- Health Outcomes -->
         <div class="data-table-card">
           <div class="table-card-header">
-            <h3>🩺 Health Outcomes</h3>
+            <h3 class="table-header-title">
+              <img src="/assets/assistance.png" alt="Health Outcomes" class="section-title-icon" />
+              <span>Health Outcomes</span>
+            </h3>
             <p>Chronic condition prevalence vs. US National average</p>
           </div>
           <table class="custom-table">
@@ -363,6 +549,22 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
+.header-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 50;
+}
+
+.header-titles h2 {
+  margin: 0 0 4px;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
 .header-titles p {
   margin: 0;
   color: var(--text-secondary);
@@ -378,6 +580,9 @@ onMounted(() => {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 50;
+  overflow: visible;
 }
 
 .control-group {
@@ -389,42 +594,316 @@ onMounted(() => {
 
 .control-group.flex-2 {
   flex: 2;
+  position: relative;
 }
 
-.control-group label {
-  font-size: 0.8rem;
+.control-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
   font-weight: 700;
   color: var(--text-primary);
 }
 
-.input-field, .select-field {
-  background: #f8fafc;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 11px 14px;
-  color: var(--text-primary);
-  font-size: 0.9rem;
-  outline: none;
-  transition: all 0.2s ease;
+.label-icon {
+  font-size: 0.95rem;
 }
 
-.input-field:focus, .select-field:focus {
-  border-color: var(--brand);
+/* Custom Searchable County Dropdown Container */
+.county-searchable-dropdown {
+  position: relative;
+  width: 100%;
+  z-index: 60;
+}
+
+.dropdown-trigger-box {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background: #ffffff;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.dropdown-trigger-box:hover,
+.dropdown-trigger-box.open {
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 3.5px rgba(47, 111, 237, 0.12);
+  background: #fdfdfd;
+}
+
+.trigger-selected-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pin-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #2f6fed;
+  flex-shrink: 0;
+}
+
+.county-name-main {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.state-pill {
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+  letter-spacing: 0.04em;
+}
+
+.fips-tag {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.dropdown-chevron-box {
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  transition: transform 0.25s ease, color 0.25s ease;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.dropdown-chevron-box.rotated {
+  transform: rotate(180deg);
+  color: #2f6fed;
+}
+
+/* Dropdown Menu Popover */
+.county-dropdown-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18), 0 4px 14px rgba(15, 23, 42, 0.08);
+  z-index: 9999;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 24px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.dropdown-search-input {
+  width: 100%;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 9px 34px 9px 36px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.dropdown-search-input:focus {
+  border-color: #2f6fed;
   box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
 }
 
+.clear-search-btn {
+  position: absolute;
+  right: 24px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.clear-search-btn:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+/* Scrollable Options List */
+.counties-options-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.counties-options-list::-webkit-scrollbar {
+  width: 6px;
+}
+.counties-options-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.county-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.county-option-row:hover {
+  background: #f1f5f9;
+}
+
+.county-option-row.active {
+  background: #eef2ff;
+  color: #2f6fed;
+}
+
+.option-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-county-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.county-option-row.active .option-county-name {
+  color: #2f6fed;
+  font-weight: 700;
+}
+
+.option-state-badge {
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.county-option-row.active .option-state-badge {
+  background: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.option-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-fips-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.active-check {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #2f6fed;
+}
+
+.no-counties-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.no-found-icon {
+  font-size: 1.5rem;
+}
+
+.dropdown-footer-tip {
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Animations */
+.dropdown-pop-enter-active,
+.dropdown-pop-leave-active {
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dropdown-pop-enter-from,
+.dropdown-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+}
+
 .btn-analyze {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: var(--brand);
   color: #ffffff;
   border: none;
-  padding: 12px 26px;
+  padding: 12px 24px;
   border-radius: 10px;
   font-weight: 700;
   font-size: 0.9rem;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(47, 111, 237, 0.25);
   transition: all 0.2s ease;
+  height: 48px;
+  flex-shrink: 0;
 }
 
 .btn-analyze:hover {
@@ -440,37 +919,139 @@ onMounted(() => {
 }
 
 .kpi-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 18px 20px;
+  position: relative;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
 }
 
+.kpi-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  transform: translateY(-2px);
+}
+
+.border-accent-indigo {
+  border-right: 4.5px solid #6366f1 !important;
+}
+
+.border-accent-blue {
+  border-right: 4.5px solid #3b82f6 !important;
+}
+
+.border-accent-emerald {
+  border-right: 4.5px solid #10b981 !important;
+}
+
+.border-accent-teal {
+  border-right: 4.5px solid #0d9488 !important;
+}
+
+.border-accent-orange {
+  border-right: 4.5px solid #f97316 !important;
+}
+
+.kpi-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.kpi-icon-box {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bg-indigo-light { background: #eef2ff; }
+.bg-blue-light { background: #eff6ff; }
+.bg-emerald-light { background: #ecfdf5; }
+.bg-teal-light { background: #f0fdfa; }
+.bg-amber-light { background: #fef3c7; }
+
 .kpi-card .lbl {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-weight: 600;
+  font-size: 0.76rem;
+  color: #64748b;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.04em;
 }
 
 .kpi-card .val {
-  font-size: 1.35rem;
+  font-size: 1.4rem;
   font-weight: 800;
-  color: var(--text-primary);
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
 }
 
-.kpi-card .val.highlight {
-  color: var(--amber-text);
-  background: var(--amber-bg);
-  padding: 2px 8px;
-  border-radius: 6px;
-  align-self: flex-start;
+.county-val-text {
+  font-size: 1.12rem !important;
+  line-height: 1.25;
+  white-space: normal;
+  word-break: break-word;
 }
+
+.kpi-state-pill {
+  display: inline-flex;
+  align-items: center;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.95rem;
+  font-weight: 800;
+  padding: 3px 12px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+}
+
+.kpi-sub-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.svi-score-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1.15rem;
+  font-weight: 800;
+  padding: 2px 10px;
+  border-radius: 8px;
+  letter-spacing: 0.02em;
+}
+
+.svi-score-badge.svi-high {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.svi-score-badge.svi-mod {
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.svi-score-badge.svi-low {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.text-risk-high { color: #dc2626; font-weight: 700; }
+.text-risk-mod { color: #d97706; font-weight: 700; }
+.text-risk-low { color: #059669; font-weight: 700; }
 
 .section-pane {
   margin-bottom: 24px;
@@ -483,11 +1064,22 @@ onMounted(() => {
   margin-bottom: 32px;
 }
 
-.table-card-header h3 {
+.table-card-header h3,
+.table-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 4px;
   font-size: 1.15rem;
   font-weight: 800;
   color: var(--text-primary);
+}
+
+.section-title-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .table-card-header p {

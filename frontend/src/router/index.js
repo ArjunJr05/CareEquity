@@ -44,6 +44,7 @@ const router = createRouter({
     },
     {
       path: '/plan',
+      alias: '/plans',
       name: 'plan',
       component: Plan,
     },

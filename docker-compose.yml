@@ -8,9 +8,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:3513@host.docker.internal:5432/careequity
+      DATABASE_URL: postgresql://postgres:latharamanan%402005@host.docker.internal:5432/careequity
+      RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
+      RAZORPAY_KEY_SECRET: 6CpEEmS1w4qzyi6A1lYwdETj
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/src:/app/src
     restart: unless-stopped
     healthcheck:
       test:
@@ -32,6 +36,8 @@ services:
     container_name: careequity-main-frontend
     ports:
       - "5173:5173"
+    environment:
+      VITE_RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
     depends_on:
       main-backend:
         condition: service_healthy

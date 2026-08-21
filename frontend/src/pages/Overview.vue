@@ -1,10 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults, userPlan } from '../store/appState'
 import { SYSTEM_BACKEND_URL } from '../config'
+
+const router = useRouter()
 
 const mapLayers = ['Health Risk', 'Social Vulnerability', 'Food Access', 'Environmental Risk', 'Healthcare Access']
 const activeLayer = ref('Health Risk')
@@ -395,6 +398,8 @@ const showConsultAI = ref(false)
 const handleConsultClick = () => {
   if (!isLoggedIn.value) {
     setShowLoginScreen(true)
+  } else if (!userPlan.value) {
+    router.push('/plan')
   } else {
     showConsultAI.value = true
   }
