@@ -8,7 +8,7 @@ from .models.audit_log import AuditLog
 from .models.assessment_history import AssessmentHistory
 from .models.subscription import Subscription
 from .models.plan_config import PlanConfig
-from .api.routes import patients, auth, admin, history, payments, subscriptions
+from .api.routes import patients, auth, admin, history, payments, subscriptions, predict
 
 # Create tables in the CareEquity database if they don't exist
 Base.metadata.create_all(bind=engine)
@@ -47,6 +47,8 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
 app.include_router(subscriptions.router, prefix="/api")
+app.include_router(predict.router)
+app.include_router(predict.router, prefix="/api")
 
 @app.get("/")
 def read_root():

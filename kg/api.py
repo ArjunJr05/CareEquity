@@ -223,116 +223,142 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     nodes_dict: Dict[str, Dict[str, Any]] = {}
     edges_list: List[Dict[str, Any]] = []
 
-    # Attempt Neo4j query first if driver is active
-    neo4j_success = False
-    if driver:
-        try:
-            cypher_query = """
-            MATCH (c:County {fips: $fips})-[r:HAS_FACTOR]->(f:SDoHFactor)
-            OPTIONAL MATCH (c)-[:IN_STATE]->(s:State)
-            RETURN c, s, r, f
-            """
-            sdoh_factors_list = []
-            with driver.session() as session:
-                result = session.run(cypher_query, fips=str(fips))
-                records = list(result)
-
-                if records:
-                    for record in records:
-                        c = record['c']
-                        s = record['s']
-                        r = record['r']
-                        f = record['f']
-
-                        if 'County' not in nodes_dict:
-                            nodes_dict['County'] = {
-                                'id': f"county_{c['fips']}",
-                                'label': c['name'],
-                                'type': 'County',
-                                'color': '#6366f1',
-                                'size': 42,
-                                'title': f"<b>{c['name']}</b><br>FIPS: {c['fips']}<br>Population: {c['population']:,}<br>Income: ${c['median_household_income']:,.0f}<br>SVI Score: {c['svi_overall']:.4f}"
-                            }
-
-                        if s and 'State' not in nodes_dict:
-                            n_id = f"state_{s['abbr']}"
-                            nodes_dict['State'] = {
-                                'id': n_id,
-                                'label': f"State: {s['abbr']}",
-                                'type': 'State',
-                                'color': '#3b82f6',
-                                'size': 26,
-                                'title': f"State: {s['abbr']}"
-                            }
-                            edges_list.append({
-                                'from': nodes_dict['County']['id'],
-                                'to': n_id,
-                                'label': 'IN_STATE',
-                                'color': '#94a3b8',
-                                'width': 2,
-                                'dashes': True,
-                                'title': 'State Link'
-                            })
-
-                        if f:
-                            r_props = dict(r)
-                            val = r_props.get('value', 0)
-                            sev = r_props.get('severity', 'Medium')
-                            prio = 0 if 'High Risk' in sev else (1 if 'Medium' in sev else 2)
-                            sdoh_factors_list.append({
-                                'factor_name': f['name'],
-                                'category': f.get('category', 'SDoH'),
-                                'value': val,
-                                'severity': sev,
-                                'priority': prio
-                            })
-
-                    sdoh_factors_list.sort(key=lambda x: x['priority'])
-                    for factor in sdoh_factors_list[:top_k]:
-                        fname = factor['factor_name']
-                        val = factor['value']
-                        sev = factor['severity']
-                        n_id = f"sdoh_{fname}"
-                        color = '#ef4444' if 'High Risk' in sev else ('#10b981' if ('Low' in sev or 'Protective' in sev) else '#f59e0b')
-
-                        nodes_dict[n_id] = {
-                            'id': n_id,
-                            'label': f"{fname}\n({val:.1f})",
-                            'type': 'SDoHFactor',
-                            'color': color,
-                            'size': 30,
-                            'title': f"<b>SDoH Feature: {fname}</b><br>Category: {factor['category']}<br>Value: {val:.2f}<br>Severity: <b>{sev}</b>"
-                        }
-                        edges_list.append({
-                            'from': nodes_dict['County']['id'],
-                            'to': n_id,
-                            'label': f"{val:.1f}",
-                            'color': color,
-                            'width': 3,
-                            'dashes': False,
-                            'title': f"Severity: {sev}"
-                        })
-                    neo4j_success = True
-        except Exception as e:
-            print(f"Neo4j query exception, falling back to dataset: {e}")
-            nodes_dict.clear()
-            edges_list.clear()
-
-    # Fallback to high-accuracy dataset graph generation
-    if not neo4j_success:
-        pop = int(c_row['population']) if 'population' in c_row and not pd.isna(c_row['population']) else 0
-        inc = float(c_row['median_household_income']) if 'median_household_income' in c_row and not pd.isna(c_row['median_household_income']) else 0.0
-        svi = float(c_row['svi_overall']) if 'svi_overall' in c_row and not pd.isna(c_row['svi_overall']) else 0.0
-        st_abbr = str(c_row.get('state_abbr', ''))
-
+    if not driver:
+        # Generate graph dynamically from local CSV dataset if Neo4j is offline
+        c_row = county_match.iloc[0]
         nodes_dict['County'] = {
             'id': f"county_{fips}",
-            'label': county_name,
+            'label': str(c_row['county_name']),
             'type': 'County',
             'color': '#6366f1',
             'size': 42,
-            'title': f"<b>{county_name}</b><br>FIPS: {fips}<br>Population: {pop:,}<br>Income: ${inc:,.0f}<br>SVI Score: {svi:.4f}"
+            'title': f"<b>{c_row['county_name']}</b><br>FIPS: {fips}<br>Population: {int(c_row['population']):,}<br>Income: ${float(c_row['median_household_income']):,.0f}<br>SVI Score: {float(c_row['svi_overall']):.4f}"
         }
+
+        # State Node
+        state_id = f"state_{c_row['state_abbr']}"
+        nodes_dict['State'] = {
+            'id': state_id,
+            'label': f"State: {c_row['state_abbr']}",
+            'type': 'State',
+            'color': '#3b82f6',
+            'size': 26,
+            'title': f"State: {c_row['state_abbr']}"
+        }
+        edges_list.append({
+            'from': nodes_dict['County']['id'],
+            'to': state_id,
+            'label': 'IN_STATE',
+            'color': '#94a3b8',
+            'width': 2,
+            'dashes': True,
+            'title': 'State Link'
+        })
+
+        # SDoH Factors from CSV
+        sdoh_cols = [
+            ("Poverty Rate", 'poverty_rate', 15.1),
+            ("Unemployment Rate", 'unemployment_rate', 5.16),
+            ("No Vehicle Rate", 'no_vehicle_rate', 6.20),
+            ("Lack of Health Insurance", 'lack_health_insurance', 11.57),
+            ("Food Insecurity", 'food_insecurity', 16.87),
+            ("Housing Insecurity", 'housing_insecurity', 13.66)
+        ]
+
+        for idx, (label, col, avg) in enumerate(sdoh_cols[:top_k]):
+            val = float(c_row[col]) if col in c_row and not pd.isna(c_row[col]) else avg
+            n_id = f"sdoh_{label.replace(' ', '_')}"
+            diff = val - avg
+            color = '#ef4444' if diff > 2 else ('#10b981' if diff < -2 else '#f59e0b')
+            sev = 'High Risk' if diff > 2 else ('Protective' if diff < -2 else 'Moderate')
+
+            nodes_dict[n_id] = {
+                'id': n_id,
+                'label': f"{label}\n({val:.1f}%)",
+                'type': 'SDoHFactor',
+                'color': color,
+                'size': 30,
+                'title': f"<b>SDoH Feature: {label}</b><br>Value: {val:.2f}%<br>National Avg: {avg:.2f}%<br>Status: <b>{sev}</b>"
+            }
+
+            edges_list.append({
+                'from': nodes_dict['County']['id'],
+                'to': n_id,
+                'label': f"{val:.1f}%",
+                'color': color,
+                'width': 3,
+                'dashes': False,
+                'title': f"Status: {sev}"
+            })
+
+        nodes_formatted = [NodeModel(**n) for n in nodes_dict.values()]
+        edges_formatted = [EdgeModel(**e) for e in edges_list]
+
+        return GraphResponse(
+            fips=str(fips),
+            county_name=county_name,
+            nodes=nodes_formatted,
+            edges=edges_formatted
+        )
+
+    cypher_query = """
+    MATCH (c:County {fips: $fips})-[r:HAS_FACTOR]->(f:SDoHFactor)
+    OPTIONAL MATCH (c)-[:IN_STATE]->(s:State)
+    RETURN c, s, r, f
+    """
+
+    sdoh_factors_list = []
+
+    with driver.session() as session:
+        result = session.run(cypher_query, fips=str(fips))
+        records = list(result)
+
+        if not records:
+            raise HTTPException(status_code=404, detail=f"No graph data found in Neo4j for FIPS {fips}.")
+
+        for record in records:
+            c = record['c']
+            s = record['s']
+            r = record['r']
+            f = record['f']
+
+            # County Node
+            if 'County' not in nodes_dict:
+                nodes_dict['County'] = {
+                    'id': f"county_{c['fips']}",
+                    'label': c['name'],
+                    'type': 'County',
+                    'color': '#6366f1',
+                    'size': 42,
+                    'title': f"<b>{c['name']}</b><br>FIPS: {c['fips']}<br>Population: {c['population']:,}<br>Income: ${c['median_household_income']:,.0f}<br>SVI Score: {c['svi_overall']:.4f}"
+                }
+
+            # State Node
+            if s and 'State' not in nodes_dict:
+                n_id = f"state_{s['abbr']}"
+                nodes_dict['State'] = {
+                    'id': n_id,
+                    'label': f"State: {s['abbr']}",
+                    'type': 'State',
+                    'color': '#3b82f6',
+                    'size': 26,
+                    'title': f"State: {s['abbr']}"
+                }
+                edges_list.append({
+                    'from': nodes_dict['County']['id'],
+                    'to': n_id,
+                    'label': 'IN_STATE',
+                    'color': '#94a3b8',
+                    'width': 2,
+                    'dashes': True,
+                    'title': 'State Link'
+                })
+
+            # SDoH Factor
+            if f:
+                r_props = dict(r)
+                val = r_props.get('value', 0)
+                sev = r_props.get('severity', 'Medium')
 
         if st_abbr:
             n_id = f"state_{st_abbr}"

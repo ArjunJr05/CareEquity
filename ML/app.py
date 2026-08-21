@@ -5,30 +5,34 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field
 
-# Import ML pipeline predictor from local ML folder
-from ml_pipeline import MedicalSDOHInferencePipeline, predict
+from ml_pipelineV2 import MedicalSDOHInferencePipelineV2
 
-# Global pipeline instance
+# Global pipeline V2 instance
 pipeline_instance = None
 
 def get_pipeline():
     global pipeline_instance
     if pipeline_instance is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        pkl_path = os.path.join(current_dir, "ml_pipeline.pkl")
+        pkl_path = os.path.join(current_dir, "ml_pipelineV2.pkl")
+        if not os.path.exists(pkl_path):
+            # Check parent workspace
+            parent_pkl = os.path.join(os.path.dirname(current_dir), "ml_pipelineV2.pkl")
+            if os.path.exists(parent_pkl):
+                pkl_path = parent_pkl
         if os.path.exists(pkl_path):
-            print(f"Loading pre-trained pipeline from {pkl_path}...")
+            print(f"Loading pre-trained V2 pipeline from {pkl_path}...")
             try:
                 with open(pkl_path, "rb") as f:
                     pipeline_instance = pickle.load(f)
-                print("Successfully loaded pre-trained pipeline from .pkl!")
+                print("Successfully loaded pre-trained ml_pipelineV2.pkl!")
             except Exception as e:
-                print(f"Error loading .pkl file ({e}), fitting fresh pipeline...")
-                pipeline_instance = MedicalSDOHInferencePipeline()
+                print(f"Error loading V2 .pkl file ({e}), fitting fresh V2 pipeline...")
+                pipeline_instance = MedicalSDOHInferencePipelineV2()
                 pipeline_instance.fit()
         else:
-            print("Fitting fresh pipeline...")
-            pipeline_instance = MedicalSDOHInferencePipeline()
+            print("Fitting fresh V2 pipeline...")
+            pipeline_instance = MedicalSDOHInferencePipelineV2()
             pipeline_instance.fit()
     return pipeline_instance
 
@@ -98,19 +102,58 @@ def health_check():
     return {"status": "healthy", "pipeline_loaded": pipeline is not None}
 
 @app.post("/predict")
-def predict_endpoint(payload: PredictRequest = Body(...)):
+def predict_endpoint(payload: Dict[str, Any] = Body(...)):
     """
     POST /predict
-    Crash-proof endpoint for multi-label disease prediction (Diabetes, Hypertension, Heart Disease, Asthma).
-    Accepts raw OCR patient medical data and frontend-style locations (country, state, county).
+    Crash-proof endpoint for multi-label disease prediction (ml_pipelineV2.pkl).
+    Accepts raw OCR patient medical data, target_locations list-of-lists [[county, state, country]], and medical conditions.
+    Logs input JSON, model processing step, output JSON, and errors directly to docker/terminal logs.
     """
+    print("\n" + "="*80, flush=True)
+    print("📥 [ML SERVICE] RECEIVED CONSOLIDATED INPUT JSON PAYLOAD:", flush=True)
+    print(json.dumps(payload, indent=2), flush=True)
+    print("="*80, flush=True)
+
     try:
+        print("⚙️ [ML SERVICE] Initializing ML Model Pipeline (ml_pipelineV2.pkl)...", flush=True)
         pipeline = get_pipeline()
-        payload_dict = payload.dict()
-        output = pipeline.predict(payload_dict)
+        
+        # Handle list of lists locations [[county, state, country], ...]
+        locations = []
+        if "target_locations" in payload and isinstance(payload["target_locations"], list):
+            for loc_item in payload["target_locations"]:
+                if isinstance(loc_item, list) and len(loc_item) >= 2:
+                    county = loc_item[0]
+                    state = loc_item[1]
+                    country = loc_item[2] if len(loc_item) > 2 else "United States"
+                    locations.append({"county": county, "state": state, "country": country})
+                elif isinstance(loc_item, dict):
+                    locations.append(loc_item)
+        elif "locations" in payload and isinstance(payload["locations"], list):
+            for loc_item in payload["locations"]:
+                if isinstance(loc_item, list) and len(loc_item) >= 2:
+                    locations.append({"county": loc_item[0], "state": loc_item[1], "country": loc_item[2] if len(loc_item) > 2 else "United States"})
+                elif isinstance(loc_item, dict):
+                    locations.append(loc_item)
+                    
+        if locations:
+            payload["locations"] = locations
+            
+        print(f"🔄 [ML SERVICE] Processing prediction across {len(locations)} location(s) using ml_pipelineV2.pkl...", flush=True)
+        output = pipeline.predict(payload)
+        
+        print("\n" + "="*80, flush=True)
+        print("📤 [ML SERVICE] GENERATED MODEL PREDICTION OUTPUT JSON:", flush=True)
+        print(json.dumps(output, indent=2), flush=True)
+        print("="*80 + "\n", flush=True)
+        
         return output
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        error_msg = f"Prediction error: {str(e)}"
+        print("\n" + "❌"*40, flush=True)
+        print(f"❌ [ML SERVICE ERROR] {error_msg}", flush=True)
+        print("❌"*40 + "\n", flush=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn

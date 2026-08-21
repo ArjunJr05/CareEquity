@@ -7,6 +7,11 @@ export const isAdmin = ref(localStorage.getItem('user_role') === 'admin')
 export const mlPredictionResults = ref(null)
 export const predictionModelResults = ref(null)
 export const ocrExtractedJson = ref(null)
+export const mlInputPayload = ref(null)
+
+export function setMlInputPayload(data) {
+  mlInputPayload.value = data
+}
 
 export const patientData = ref({
   name: '',
