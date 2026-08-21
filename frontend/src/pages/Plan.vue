@@ -60,6 +60,7 @@ const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, order
       if (data.user_id && !localStorage.getItem('user_id')) {
         localStorage.setItem('user_id', data.user_id)
       }
+      setUserPlan(planKey)
       return data
     }
   } catch (e) {

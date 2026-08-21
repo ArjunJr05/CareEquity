@@ -15,7 +15,11 @@ PRIMARY_MODEL   = "meta/llama-3.1-8b-instruct"
 FALLBACK_MODEL  = "meta/llama-3.1-70b-instruct"
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-from mcp_client import search_pubmed_sync   # type: ignore
+try:
+    from mcp_client import search_pubmed_sync   # type: ignore
+except Exception as _mcp_err:
+    def search_pubmed_sync(query: str, max_results: int = 3) -> str:
+        return "PubMed MCP unavailable."
 
 # ── CSV for FIPS lookup ────────────────────────────────────────────
 import pandas as _pd
@@ -784,7 +788,7 @@ def ask_bot(user_question: str, county_context: str,
             {"role": "user",      "content": user_question},
             {"role": "assistant", "content": answer},
         ]
-        return answer, updated_history
+        return answer, updated_history, int((len(user_question.split()) + len(answer.split())) * 1.3) + 10
 
     # ── Greeting / farewell / casual ─────────────────────────────────────────
     if intent == "greeting":
@@ -805,7 +809,7 @@ def ask_bot(user_question: str, county_context: str,
             {"role": "user",      "content": user_question},
             {"role": "assistant", "content": answer},
         ]
-        return answer, updated_history
+        return answer, updated_history, int((len(user_question.split()) + len(answer.split())) * 1.3) + 10
 
     # ── "My county / my place" — return county summary ───────────────────────
     if intent == "county_info":
@@ -815,7 +819,7 @@ def ask_bot(user_question: str, county_context: str,
             {"role": "user",      "content": user_question},
             {"role": "assistant", "content": answer},
         ]
-        return answer, updated_history
+        return answer, updated_history, int((len(user_question.split()) + len(answer.split())) * 1.3) + 10
 
     _status(f"*Intent: {'Risk Factor Analysis' if intent=='risk' else 'Care & Interventions' if intent=='care' else 'Full Analysis'}*")
 
@@ -866,11 +870,18 @@ def ask_bot(user_question: str, county_context: str,
 
     answer = _sanitise_citations(answer, real_articles, factor_articles)
 
+    tokens_used = 0
+    if resp and hasattr(resp, "usage") and resp.usage:
+        tokens_used = getattr(resp.usage, "total_tokens", 0) or (len(user_question.split()) + len(answer.split()))
+    else:
+        # Fallback token estimation (approx 1.3 tokens per word)
+        tokens_used = int((len(user_question.split()) + len(answer.split())) * 1.3) + 15
+
     updated_history = list(chat_history) + [
         {"role": "user",      "content": user_question},
         {"role": "assistant", "content": answer},
     ]
-    return answer, updated_history
+    return answer, updated_history, tokens_used
 
 
 # ══════════════════════════════════════════════════════════════════════════════

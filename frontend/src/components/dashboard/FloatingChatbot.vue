@@ -1,18 +1,50 @@
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from './IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
-import { SYSTEM_BACKEND_URL } from '../../config'
+import { 
+  isLoggedIn, 
+  setShowLoginScreen, 
+  userPlan, 
+  isAiDrawerOpen, 
+  toggleAiDrawer,
+  userTokensAllocated,
+  userTokensUsed,
+  isTokenLimitReached,
+  currentUserId,
+  currentUserEmail,
+  syncUserSubscription,
+  patientData,
+  ocrExtractedJson,
+  mlInputPayload,
+  locationRecords
+} from '../../store/appState'
+import { SYSTEM_BACKEND_URL, RAG_BACKEND_URL } from '../../config'
+import { US_COUNTIES_BY_STATE } from '../../data/usData.js'
 
 const router = useRouter()
 
-const isOpen = ref(false)
+const isOpen = isAiDrawerOpen
 const activeTab = ref('overview') // 'overview' or 'chat'
 const selectedMode = ref('analyze') // 'analyze' or 'suggest'
 const chatInput = ref('')
 const isThinking = ref(false)
 const messagesRef = ref(null)
+
+const remainingTokens = computed(() => {
+  if (userPlan.value === 'pro' || userTokensAllocated.value === -1) return 'Unlimited'
+  const left = userTokensAllocated.value - userTokensUsed.value
+  return left > 0 ? left : 0
+})
+
+function goToPlans() {
+  isOpen.value = false
+  router.push('/plan')
+}
+
+onMounted(() => {
+  syncUserSubscription(SYSTEM_BACKEND_URL)
+})
 
 const messages = ref([
   {
@@ -36,7 +68,8 @@ function toggleChat() {
     router.push('/plan')
     return
   }
-  isOpen.value = !isOpen.value
+  loadChatHistory()
+  toggleAiDrawer()
 }
 
 function selectMode(mode) {
@@ -48,12 +81,7 @@ function sendPrompt(promptText) {
   handleSendMessage()
 }
 
-function formatMessageText(text) {
-  if (!text) return ''
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br/>')
-}
+
 
 function scrollToBottom() {
   nextTick(() => {
@@ -63,57 +91,335 @@ function scrollToBottom() {
   })
 }
 
+// Helper to extract or default county FIPS from user query or uploaded location records (1 to 5)
+function resolveFipsFromQuery(text) {
+  const lower = text.toLowerCase()
+  
+  // FIPS direct match if specified
+  const fipsMatch = text.match(/\b\d{4,5}\b/)
+  if (fipsMatch) return fipsMatch[0]
+
+  // Known county name to FIPS lookup map
+  const countyFipsMap = {
+    'cuyahoga': '39035',
+    'wayne': '26163',
+    'marion': '18097',
+    'franklin': '39049',
+    'autauga': '1001',
+    'king': '53033',
+    'trego': '20195',
+    'cook': '17031',
+    'harris': '48201',
+    'maricopa': '04013'
+  }
+
+  // 1. Check direct match in user query text
+  for (const [cName, cFips] of Object.entries(countyFipsMap)) {
+    if (lower.includes(cName)) return cFips
+  }
+
+  // 2. Check location records (up to 5 locations) from Data Setup
+  if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
+    for (const loc of locationRecords.value) {
+      if (loc.fips) return String(loc.fips)
+      const locName = (loc.county || loc.name || '').toLowerCase()
+      for (const [cName, cFips] of Object.entries(countyFipsMap)) {
+        if (locName.includes(cName)) return cFips
+      }
+    }
+  }
+
+  // 3. Check patientData / OCR / ML payload
+  if (patientData.value?.fips) return String(patientData.value.fips)
+  if (mlInputPayload.value?.fips) return String(mlInputPayload.value.fips)
+  if (ocrExtractedJson.value?.fips) return String(ocrExtractedJson.value.fips)
+
+  const activeCounty = (patientData.value?.county || (patientData.value?.locations && patientData.value.locations[0]?.county) || '').toLowerCase()
+  for (const [cName, cFips] of Object.entries(countyFipsMap)) {
+    if (activeCounty.includes(cName)) return cFips
+  }
+
+  return '53033' // King County, WA default or fallback
+}
+
+async function recordTokensConsumed(consumed) {
+  if (!consumed || consumed <= 0) return
+  userTokensUsed.value += consumed
+  localStorage.setItem('tokens_used', String(userTokensUsed.value))
+  
+  if (userTokensAllocated.value !== -1 && userTokensUsed.value >= userTokensAllocated.value) {
+    isTokenLimitReached.value = true
+  }
+
+  try {
+    const params = new URLSearchParams()
+    if (currentUserEmail.value) params.append('email', currentUserEmail.value)
+    if (currentUserId.value) params.append('user_id', currentUserId.value)
+    params.append('tokens', consumed)
+
+    const res = await fetch(`${SYSTEM_BACKEND_URL}/api/subscriptions/consume-tokens?${params.toString()}`, {
+      method: 'POST'
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.limit_reached) {
+        isTokenLimitReached.value = true
+      }
+      if (typeof data.tokens_used === 'number') {
+        userTokensUsed.value = data.tokens_used
+        localStorage.setItem('tokens_used', String(data.tokens_used))
+      }
+      if (typeof data.tokens_allocated === 'number') {
+        userTokensAllocated.value = data.tokens_allocated
+        localStorage.setItem('tokens_allocated', String(data.tokens_allocated))
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to post consumed tokens:', e)
+  }
+}
+
 function handleSendMessage() {
+  if (isTokenLimitReached.value) {
+    activeTab.value = 'chat'
+    return
+  }
+
   const text = chatInput.value.trim()
   if (!text) return
 
   // Switch to active chat feed view
   activeTab.value = 'chat'
   messages.value.push({ role: 'user', text })
+  saveChatHistory()
   chatInput.value = ''
   isThinking.value = true
   scrollToBottom()
 
-  // Try live FastAPI chat endpoint, fallback to intelligent simulation
-  const chatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
-  fetch(chatUrl, {
+  const activeFips = resolveFipsFromQuery(text)
+  const ragChatUrl = `${RAG_BACKEND_URL}/api/chat`
+
+  // Format message history for RAG API schema
+  const formattedHistory = messages.value
+    .slice(0, -1)
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: m.text }))
+
+  fetch(ragChatUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role: 'user', content: text })
+    body: JSON.stringify({
+      fips: activeFips,
+      question: text,
+      chat_history: formattedHistory
+    })
   })
   .then(r => {
-    if (!r.ok) throw new Error('Live Chat API HTTP error: ' + r.status)
+    if (!r.ok) throw new Error('RAG Chat API HTTP error: ' + r.status)
     return r.json()
   })
   .then(data => {
     isThinking.value = false
-    const reply = data.response || 'No response received from AI service.'
-    messages.value.push({ role: 'assistant', text: reply })
+    const reply = data.answer || 'No response received from RAG service.'
+    const tokens = data.tokens_used || (Math.round((text.length + reply.length) / 4))
+    messages.value.push({ role: 'assistant', text: reply, tokens })
+    recordTokensConsumed(tokens)
+    saveChatHistory()
     scrollToBottom()
   })
   .catch(err => {
-    console.warn('Falling back to local AI assistant response:', err)
-    isThinking.value = false
-    let reply = ''
-    const lower = text.toLowerCase()
+    console.warn('Falling back to main system AI assistant:', err)
+    
+    // Attempt fallback to system backend
+    const systemChatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
+    fetch(systemChatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'user', content: text })
+    })
+    .then(r => {
+      if (!r.ok) throw new Error('System Chat API HTTP error: ' + r.status)
+      return r.json()
+    })
+    .then(data => {
+      isThinking.value = false
+      const reply = data.response || 'No response received from system backend.'
+      const tokens = Math.round((text.length + reply.length) / 4)
+      messages.value.push({ role: 'assistant', text: reply, tokens })
+      recordTokensConsumed(tokens)
+      saveChatHistory()
+      scrollToBottom()
+    })
+    .catch(() => {
+      isThinking.value = false
+      let reply = ''
+      const lower = text.toLowerCase()
 
-    if (lower.includes('wayne')) {
-      reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
-    } else if (lower.includes('cuyahoga')) {
-      reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate Risk)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
-    } else if (lower.includes('marion')) {
-      reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate Risk)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
-    } else if (lower.includes('franklin')) {
-      reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and outer beltways. Environmental ozone warnings are active.'
-    } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
-      reply = 'Hello! I am your **CareEquity Consult AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
-    } else {
-      reply = `Thank you for asking! Regarding "${text}", I am analyzing the SVI dataset across Cuyahoga, Wayne, Marion, and Franklin counties. Please specify which county or risk factor you would like to drill down into.`
+      if (lower.includes('wayne')) {
+        reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
+      } else if (lower.includes('cuyahoga')) {
+        reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate Risk)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
+      } else if (lower.includes('marion')) {
+        reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate Risk)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
+      } else if (lower.includes('franklin')) {
+        reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and outer beltways. Environmental ozone warnings are active.'
+      } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+        reply = 'Hello! I am your **CareEquity Consult AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
+      } else {
+        const activeLoc = (patientData.value?.address || ocrExtractedJson.value?.address || 'Cuyahoga County, OH')
+        reply = `Analyzing query regarding location: "${activeLoc}" (FIPS ${activeFips}). Querying SDoH Knowledge Graph & PubMed RAG data... \n\nKey environmental & SDoH finding: Resource access index in ${activeLoc} highlights food security, housing, and environmental exposure as key drivers. Recommended clinical path: Deploy targeted mobile health units and community environmental support partnerships.`
+      }
+
+      const tokens = Math.round((text.length + reply.length) / 4)
+      messages.value.push({ role: 'assistant', text: reply, tokens })
+      recordTokensConsumed(tokens)
+      saveChatHistory()
+      scrollToBottom()
+    })
+  })
+}
+
+const isSearchOpen = ref(true)
+const searchQuery = ref('')
+
+// Load user-specific chat history from localStorage (Strict User Isolation)
+function getChatStorageKey() {
+  const uid = currentUserId.value || localStorage.getItem('user_id')
+  const email = currentUserEmail.value || localStorage.getItem('user_email')
+  if (!uid && !email) return null
+  return `careequity_chat_history_${uid || 'id'}_${email || 'email'}`
+}
+
+const DEFAULT_INITIAL_MESSAGE = {
+  role: 'assistant',
+  text: 'Hello! I am your **CareEquity Consult AI Assistant**. How can I help you analyze SDOH risk factors or suggest clinical action plans today?'
+}
+
+function loadChatHistory() {
+  try {
+    const userKey = getChatStorageKey()
+    
+    // Reset to default assistant message if user is not logged in / no user key
+    if (!userKey) {
+      messages.value = [DEFAULT_INITIAL_MESSAGE]
+      activeTab.value = 'overview'
+      return
     }
 
-    messages.value.push({ role: 'assistant', text: reply })
-    scrollToBottom()
+    const saved = localStorage.getItem(userKey)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        messages.value = parsed
+        activeTab.value = 'chat'
+        scrollToBottom()
+        return
+      }
+    }
+    
+    // If no local history found for this specific user, reset messages state first
+    messages.value = [DEFAULT_INITIAL_MESSAGE]
+    activeTab.value = 'overview'
+    
+    // Fetch old questions & answers strictly for this authenticated user's email from remote database
+    const email = currentUserEmail.value || localStorage.getItem('user_email')
+    if (email) {
+      fetch(`${SYSTEM_BACKEND_URL}/api/history/email/${encodeURIComponent(email)}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(remoteHistory => {
+          if (Array.isArray(remoteHistory) && remoteHistory.length > 0) {
+            const loadedMsgs = [DEFAULT_INITIAL_MESSAGE]
+            remoteHistory.forEach(item => {
+              if (item.prompt) loadedMsgs.push({ role: 'user', text: item.prompt })
+              if (item.response) loadedMsgs.push({ role: 'assistant', text: item.response })
+            })
+            messages.value = loadedMsgs
+            activeTab.value = 'chat'
+            saveChatHistory()
+            scrollToBottom()
+          }
+        })
+        .catch(err => console.warn('Could not fetch remote chat history for user:', err))
+    }
+  } catch (e) {
+    console.warn('Failed to load user chat history:', e)
+  }
+}
+
+function saveChatHistory() {
+  try {
+    const userKey = getChatStorageKey()
+    if (!userKey) return // Do not save history for unauthenticated/guest sessions
+    const dataStr = JSON.stringify(messages.value)
+    localStorage.setItem(userKey, dataStr)
+  } catch (e) {
+    console.warn('Failed to save user chat history:', e)
+  }
+}
+
+function clearChatHistory() {
+  messages.value = [DEFAULT_INITIAL_MESSAGE]
+  const key = getChatStorageKey()
+  if (key) {
+    localStorage.removeItem(key)
+  }
+  activeTab.value = 'overview'
+}
+
+import { watch } from 'vue'
+
+watch(isOpen, (newVal) => {
+  if (newVal) {
+    loadChatHistory()
+  }
+})
+
+watch(isLoggedIn, (newVal) => {
+  if (newVal) {
+    loadChatHistory()
+  }
+})
+
+onMounted(() => {
+  syncUserSubscription(SYSTEM_BACKEND_URL)
+  loadChatHistory()
+})
+
+function formatMessageText(text) {
+  if (!text) return ''
+
+  // 1. Process Markdown tables
+  let formatted = text.replace(/((?:\|[^\n]+\|\r?\n)+)/g, (match) => {
+    const lines = match.trim().split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) return match
+    
+    // Filter out separator line like |---|---|
+    const tableRows = lines.filter(l => !/^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/.test(l))
+    if (tableRows.length === 0) return match
+
+    let html = '<div class="chat-table-wrapper"><table class="chat-table">'
+    tableRows.forEach((rowStr, idx) => {
+      const cells = rowStr.split('|').map(c => c.trim()).slice(1, -1)
+      const tag = idx === 0 ? 'th' : 'td'
+      html += '<tr>' + cells.map(c => `<${tag}>${c}</${tag}>`).join('') + '</tr>'
+    })
+    html += '</table></div>'
+    return html
   })
+
+  // 2. Bold text & line breaks
+  formatted = formatted
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br/>')
+
+  // 3. Highlight Search Text if Search Query Active
+  if (searchQuery.value && searchQuery.value.trim().length > 0) {
+    const q = searchQuery.value.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${q})`, 'gi')
+    formatted = formatted.replace(regex, '<mark class="chat-highlight">$1</mark>')
+  }
+
+  return formatted
 }
 </script>
 
@@ -125,11 +431,12 @@ function handleSendMessage() {
       class="floating-chat-btn" 
       :class="{ open: isOpen }"
       @click="toggleChat"
-      title="Open Consult AI Assistant"
+      :title="isOpen ? 'Close Consult AI' : 'Open Consult AI Assistant'"
     >
       <div class="btn-glow-ring"></div>
-      <img src="/assets/assistance.gif" alt="AI Assistant" class="chat-gif-icon" />
-      <span class="online-indicator"></span>
+      <img v-if="!isOpen" src="/assets/assistance.gif" alt="AI Assistant" class="chat-gif-icon" />
+      <span v-else class="close-trigger-icon">&times;</span>
+      <span v-if="!isOpen" class="online-indicator"></span>
     </button>
 
     <!-- Optional Backdrop Blur Overlay -->
@@ -144,22 +451,62 @@ function handleSendMessage() {
         <!-- Top Header -->
         <div class="chat-header">
           <div class="header-left">
-            <button v-if="activeTab === 'chat'" class="back-btn" @click="activeTab = 'overview'" title="Back to Consult AI Screen">
-              ←
-            </button>
             <h4 class="header-title">Consult AI Assistant</h4>
           </div>
-          <button class="close-chat-btn" @click="isOpen = false" title="Close">&times;</button>
+          <div class="header-right-actions">
+            <button class="header-icon-btn" :class="{ active: isSearchOpen }" @click="isSearchOpen = !isSearchOpen" title="Search in chat">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </button>
+            <button class="header-icon-btn" @click="clearChatHistory" title="Clear chat history">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+            <div class="header-token-counter" title="Remaining tokens">
+              ⚡ {{ remainingTokens }} tokens
+            </div>
+          </div>
+        </div>
+
+        <!-- Search Bar Drawer Overlay -->
+        <div v-if="isSearchOpen" class="chat-search-bar-row">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input 
+            v-model="searchQuery" 
+            type="text" 
+            placeholder="Search keywords in conversation..." 
+            class="chat-search-input"
+          />
+          <button v-if="searchQuery" class="clear-search-btn" @click="searchQuery = ''">&times;</button>
+        </div>
+
+        <!-- Token Limit Exceeded Notice -->
+        <div v-if="isTokenLimitReached" class="limit-reached-banner">
+          <div class="limit-banner-content">
+            <div class="limit-icon">⚠️</div>
+            <div class="limit-text">
+              <strong>Token Limit Reached!</strong>
+              <p>You have used your {{ userPlan === 'free' ? '50,000 Free' : '250,000 Basic' }} plan tokens. Upgrade to continue consulting AI.</p>
+            </div>
+          </div>
+          <button class="upgrade-now-btn" @click="goToPlans">
+            Subscribe Now →
+          </button>
         </div>
 
         <!-- Consult AI Overview / Welcome Screen -->
         <div v-if="activeTab === 'overview'" class="consult-overview-body">
           
-          <!-- Blue Heart Icon Badge -->
+          <!-- App Logo Badge (replaced heart) -->
           <div class="blue-icon-badge">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
-            </svg>
+            <img src="/assets/careequity_remove.png" alt="CareEquity Logo" class="badge-logo-img" />
           </div>
 
           <!-- Main Title -->
@@ -203,16 +550,6 @@ function handleSendMessage() {
             </div>
           </div>
 
-          <!-- "Great for:" bullet section -->
-          <div class="great-for-section">
-            <h5 class="great-for-title">Great for:</h5>
-            <ul class="great-for-list">
-              <li>Identifying community disparities</li>
-              <li>Targeting preventative care outreach</li>
-              <li>Recommending local support programs</li>
-            </ul>
-          </div>
-
           <!-- Quick suggestion pill buttons -->
           <div class="quick-prompts-list">
             <button 
@@ -233,8 +570,11 @@ function handleSendMessage() {
               @keydown.enter.exact.prevent="handleSendMessage"
               rows="3"
             ></textarea>
-            <button class="bottom-floating-chat-icon" @click="handleSendMessage" title="Send message">
-              <img src="/assets/assistance.gif" alt="AI Assistant" />
+            <button class="bottom-send-icon-btn" :disabled="!chatInput.trim()" @click="handleSendMessage" title="Send message">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"></path>
+                <path d="M12 5l7 7-7 7"></path>
+              </svg>
             </button>
           </div>
 
@@ -252,7 +592,12 @@ function handleSendMessage() {
               <div v-if="msg.role === 'assistant'" class="avatar-mini">
                 <img src="/assets/assistance.gif" alt="AI" />
               </div>
-              <div class="msg-bubble" :class="msg.role" v-html="formatMessageText(msg.text)"></div>
+              <div class="msg-bubble" :class="msg.role">
+                <div v-html="formatMessageText(msg.text)"></div>
+                <div v-if="msg.role === 'assistant' && msg.tokens" class="token-badge">
+                  ⚡ {{ msg.tokens }} tokens
+                </div>
+              </div>
             </div>
 
             <!-- Thinking / Loading Dots -->
@@ -277,7 +622,10 @@ function handleSendMessage() {
               @keyup.enter="handleSendMessage"
             />
             <button class="send-btn" :disabled="!chatInput.trim()" @click="handleSendMessage">
-              <IconBase name="trend" :size="14" style="transform: rotate(45deg);" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"></path>
+                <path d="M12 5l7 7-7 7"></path>
+              </svg>
             </button>
           </div>
         </div>
@@ -345,45 +693,124 @@ function handleSendMessage() {
   border: 2px solid #ffffff;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
   z-index: 2;
+}.close-trigger-icon {
+  font-size: 2rem;
+  color: #1d6bf3;
+  line-height: 1;
+  font-weight: 300;
 }
 
-/* Backdrop Blur Overlay */
+/* Backdrop Blur Overlay - transparent click outside receiver */
 .chat-drawer-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(15, 23, 42, 0.15);
-  backdrop-filter: blur(2px);
+  background: transparent;
   z-index: 9999;
 }
 
-/* Full Height Right Drawer Panel */
+/* Floating Widget Card (Bottom Right Popup Widget) */
 .chat-popup-card {
   position: fixed;
-  top: 0;
-  right: 0;
-  width: 440px;
-  max-width: 100vw;
-  height: 100vh;
+  bottom: 90px;
+  right: 24px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  height: 600px;
+  max-height: calc(100vh - 120px);
   background: #ffffff;
-  border-left: 1px solid #e2e8f0;
-  box-shadow: -12px 0 40px rgba(15, 23, 42, 0.16);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 20px 48px -10px rgba(15, 23, 42, 0.22), 0 0 1px rgba(0,0,0,0.1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 10000;
 }
 
-/* Clean Header */
+/* Application Blue Header Theme */
 .chat-header {
-  background: #ffffff;
-  padding: 18px 24px;
+  background: linear-gradient(135deg, #1d6bf3 0%, #2563eb 100%);
+  padding: 14px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.header-icon-btn:hover,
+.header-icon-btn.active {
+  background: #ffffff;
+  color: #1d6bf3;
+}
+
+.chat-search-bar-row {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.chat-search-input {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  outline: none;
+  background: #ffffff;
+  color: #1e293b;
+}
+
+.chat-search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.clear-search-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.clear-search-btn:hover {
+  color: #475569;
+}
+
+:deep(.chat-highlight) {
+  background-color: #fef08a !important;
+  color: #854d0e !important;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-weight: 700;
 }
 
 .header-left {
@@ -393,9 +820,9 @@ function handleSendMessage() {
 }
 
 .back-btn {
-  background: #f1f5f9;
+  background: rgba(255, 255, 255, 0.2);
   border: none;
-  color: #475569;
+  color: #ffffff;
   font-size: 1rem;
   width: 28px;
   height: 28px;
@@ -408,15 +835,83 @@ function handleSendMessage() {
 
 .header-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  color: #0f172a;
+  color: #ffffff;
+}
+
+.header-token-counter {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #eff6ff;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.limit-reached-banner {
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeIn 0.3s ease;
+}
+
+.limit-banner-content {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.limit-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.limit-text {
+  font-size: 0.78rem;
+  color: #991b1b;
+}
+
+.limit-text strong {
+  display: block;
+  font-size: 0.84rem;
+  color: #7f1d1d;
+  margin-bottom: 2px;
+}
+
+.limit-text p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.upgrade-now-btn {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  align-self: flex-end;
+  transition: background 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+}
+
+.upgrade-now-btn:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
 }
 
 .close-chat-btn {
   background: transparent;
   border: none;
-  color: #94a3b8;
+  color: rgba(255, 255, 255, 0.8);
   font-size: 1.4rem;
   line-height: 1;
   padding: 4px;
@@ -425,35 +920,42 @@ function handleSendMessage() {
 }
 
 .close-chat-btn:hover {
-  color: #334155;
+  color: #ffffff;
 }
 
-/* Consult AI Overview Body */
+/* Consult AI Overview Body (Non-scrollable fit) */
 .consult-overview-body {
   flex: 1;
-  padding: 24px 28px;
-  overflow-y: auto;
+  padding: 20px 24px;
+  overflow-y: hidden;
   display: flex;
   flex-direction: column;
   background: #ffffff;
 }
 
-/* Blue Heart Icon Badge */
+/* App Logo Badge */
 .blue-icon-badge {
-  width: 56px;
-  height: 56px;
-  background: #3b82f6;
+  width: 54px;
+  height: 54px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
   border-radius: 16px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.15);
+}
+
+.badge-logo-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
 .consult-title {
-  margin: 16px 0 2px 0;
-  font-size: 1.85rem;
+  margin: 12px 0 2px 0;
+  font-size: 1.75rem;
   font-weight: 800;
   color: #2563eb;
   text-align: center;
@@ -461,8 +963,8 @@ function handleSendMessage() {
 }
 
 .consult-subtitle {
-  margin: 0 0 24px 0;
-  font-size: 0.88rem;
+  margin: 0 0 18px 0;
+  font-size: 0.85rem;
   font-weight: 500;
   color: #64748b;
   text-align: center;
@@ -472,15 +974,15 @@ function handleSendMessage() {
 .action-cards-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .action-card {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  padding: 16px 14px;
+  padding: 14px 12px;
   cursor: pointer;
   text-align: left;
   transition: all 0.2s ease;
@@ -501,65 +1003,41 @@ function handleSendMessage() {
 }
 
 .card-title {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: #1e293b;
 }
 
 .card-desc {
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   color: #64748b;
   line-height: 1.35;
-}
-
-/* Great For Section */
-.great-for-section {
-  border-left: 3px solid #3b82f6;
-  padding-left: 14px;
-  margin-bottom: 24px;
-  text-align: left;
-}
-
-.great-for-title {
-  margin: 0 0 6px 0;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.great-for-list {
-  margin: 0;
-  padding-left: 16px;
-  color: #475569;
-  font-size: 0.84rem;
-  line-height: 1.65;
 }
 
 /* Quick Prompt Pills */
 .quick-prompts-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .quick-prompt-pill {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 12px 18px;
-  font-size: 0.86rem;
+  padding: 10px 14px;
+  font-size: 0.82rem;
   font-weight: 500;
   color: #334155;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
-  width: 100%;
 }
 
 .quick-prompt-pill:hover {
   background: #eff6ff;
-  border-color: #3b82f6;
+  border-color: #bfdbfe;
   color: #2563eb;
 }
 
@@ -569,10 +1047,10 @@ function handleSendMessage() {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  min-height: 110px;
+  min-height: 90px;
   margin-top: auto;
 }
 
@@ -581,42 +1059,39 @@ function handleSendMessage() {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   color: #1e293b;
   resize: none;
   font-family: inherit;
   line-height: 1.4;
-  padding-right: 50px;
+  padding-right: 42px;
 }
 
-.bottom-floating-chat-icon {
+.bottom-send-icon-btn {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 44px;
-  height: 44px;
+  right: 10px;
+  bottom: 10px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid #6366f1;
-  padding: 3px;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border: none;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  transition: transform 0.2s ease;
+  transition: all 0.2s ease;
 }
 
-.bottom-floating-chat-icon:hover {
+.bottom-send-icon-btn:hover:not(:disabled) {
   transform: scale(1.08);
+  background: linear-gradient(135deg, #2563eb, #1e40af);
 }
 
-.bottom-floating-chat-icon img {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
+.bottom-send-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Chat Feed Screen */
@@ -641,6 +1116,7 @@ function handleSendMessage() {
   display: flex;
   gap: 8px;
   align-items: flex-end;
+  min-width: 0;
 }
 
 .msg-bubble-wrapper.user {
@@ -669,11 +1145,14 @@ function handleSendMessage() {
 }
 
 .msg-bubble {
-  max-width: 82%;
+  max-width: 88%;
   padding: 11px 15px;
   border-radius: 14px;
   font-size: 0.82rem;
   line-height: 1.45;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .msg-bubble.user {
@@ -688,6 +1167,19 @@ function handleSendMessage() {
   border: 1px solid #e2e8f0;
   border-bottom-left-radius: 2px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  overflow-x: auto;
+}
+
+.token-badge {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
 }
 
 .msg-bubble.thinking {
@@ -758,6 +1250,43 @@ function handleSendMessage() {
 .send-btn:disabled {
   background: #cbd5e1;
   cursor: not-allowed;
+}
+
+/* Chat Table Styling for RAG / Markdown Responses */
+.chat-table-wrapper {
+  margin: 10px 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+:deep(.chat-table) {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  text-align: left;
+}
+
+:deep(.chat-table th) {
+  background: rgba(59, 130, 246, 0.08);
+  font-weight: 700;
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+:deep(.chat-table td) {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  color: #475569;
+  word-break: break-word;
+}
+
+:deep(.chat-table tr:last-child td) {
+  border-bottom: none;
 }
 
 /* Transitions */

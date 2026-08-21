@@ -8,6 +8,22 @@ export const mlPredictionResults = ref(null)
 export const predictionModelResults = ref(null)
 export const ocrExtractedJson = ref(null)
 export const mlInputPayload = ref(null)
+export const locationRecords = ref([]) // Array supporting up to 5 uploaded locations
+export const isAiDrawerOpen = ref(false)
+
+export function setLocationRecords(records) {
+  if (Array.isArray(records)) {
+    locationRecords.value = records.slice(0, 5)
+  }
+}
+
+export function toggleAiDrawer(val) {
+  if (typeof val === 'boolean') {
+    isAiDrawerOpen.value = val
+  } else {
+    isAiDrawerOpen.value = !isAiDrawerOpen.value
+  }
+}
 
 export function setMlInputPayload(data) {
   mlInputPayload.value = data
@@ -33,6 +49,9 @@ export const currentUserEmail = ref(localStorage.getItem('user_email') || '')
 export const currentUserId = ref(localStorage.getItem('user_id') || '')
 
 export const userPlan = ref(localStorage.getItem('user_plan') || null)
+export const userTokensAllocated = ref(parseInt(localStorage.getItem('tokens_allocated') || '250000'))
+export const userTokensUsed = ref(parseInt(localStorage.getItem('tokens_used') || '0'))
+export const isTokenLimitReached = ref(false)
 
 export function setLoggedIn(val, userData = null) {
   isLoggedIn.value = val
@@ -122,6 +141,19 @@ export async function syncUserSubscription(backendUrl = 'http://localhost:8000')
       const data = await res.json()
       if (data && data.plan && data.subscribe) {
         setUserPlan(data.plan.toLowerCase())
+        if (typeof data.tokens_allocated === 'number') {
+          userTokensAllocated.value = data.tokens_allocated
+          localStorage.setItem('tokens_allocated', String(data.tokens_allocated))
+        }
+        if (typeof data.tokens_used === 'number') {
+          userTokensUsed.value = data.tokens_used
+          localStorage.setItem('tokens_used', String(data.tokens_used))
+        }
+        if (data.tokens_allocated !== -1 && data.tokens_used >= data.tokens_allocated) {
+          isTokenLimitReached.value = true
+        } else {
+          isTokenLimitReached.value = false
+        }
         return data.plan.toLowerCase()
       } else {
         setUserPlan(null)

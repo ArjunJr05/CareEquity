@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:latharamanan%402005@host.docker.internal:5432/careequity
+      DATABASE_URL: postgresql://postgres:3513@host.docker.internal:5432/careequity
       RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
       RAZORPAY_KEY_SECRET: 6CpEEmS1w4qzyi6A1lYwdETj
     extra_hosts:
@@ -82,13 +82,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  kg-backend:
+  rag-backend:
     build:
-      context: ./kg
+      context: ./rag
       dockerfile: Dockerfile
-    container_name: careequity-kg-backend
+    container_name: careequity-rag-backend
     ports:
       - "8002:8000"
+    env_file:
+      - ./rag/.env
     environment:
       - NEO4J_URI=neo4j+s://8357afa1.databases.neo4j.io
       - NEO4J_USERNAME=8357afa1
@@ -115,15 +117,17 @@ services:
       retries: 5
       start_period: 20s
 
-  kg-frontend:
+  rag-frontend:
     build:
-      context: ./kg
+      context: ./rag
       dockerfile: Dockerfile.streamlit
-    container_name: careequity-kg-frontend
+    container_name: careequity-rag-frontend
     ports:
       - "8502:8502"
+    env_file:
+      - ./rag/.env
     environment:
-      - FASTAPI_URL=http://kg-backend:8000
+      - FASTAPI_URL=http://rag-backend:8000
       - NEO4J_URI=neo4j+s://8357afa1.databases.neo4j.io
       - NEO4J_USERNAME=8357afa1
       - NEO4J_PASSWORD=zY1Fk-hmxuF02rmC9M8aYLYAqfTj3-AvErXJObPJafE
@@ -131,6 +135,6 @@ services:
       - AURA_INSTANCEID=8357afa1
       - AURA_INSTANCENAME=Instance01
     depends_on:
-      kg-backend:
+      rag-backend:
         condition: service_healthy
     restart: unless-stopped

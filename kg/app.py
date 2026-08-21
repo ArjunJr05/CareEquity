@@ -290,7 +290,6 @@ physics_enabled = True
 st.title("Social Determinants of Health (SDoH) Knowledge Graph")
 st.markdown("Explore county-level socioeconomic barriers, infrastructure, food access, and chronic health outcomes powered by **FastAPI & Neo4j**.")
 
-# Zipcode mapping / lookup dictionary
 ZIP_TO_FIPS = {
     # Sample US Zipcodes mapped to County FIPS for instant lookup
     "36003": "1001", "36006": "1001", "36008": "1001", "36066": "1001", "36067": "1001", # Autauga County, AL
@@ -299,7 +298,10 @@ ZIP_TO_FIPS = {
     "94102": "6075", "94103": "6075", "94107": "6075", "94110": "6075", # San Francisco, CA
     "30301": "13121", "30303": "13121", "30305": "13121", "30309": "13121", # Fulton County, GA
     "10001": "36061", "10002": "36061", "10011": "36061", "10019": "36061", # New York County, NY
-    "33101": "12086", "33139": "12086", "33140": "12086", # Miami-# Load county list for autocomplete (from FastAPI if available, else pandas)
+    "33101": "12086", "33139": "12086", "33140": "12086", # Miami-Dade, FL
+}
+
+# Load county list for autocomplete (from FastAPI if available, else pandas)
 api_counties = fetch_counties_from_api(FASTAPI_URL) if use_fastapi else None
 
 if api_counties:
@@ -307,15 +309,14 @@ if api_counties:
 else:
     county_options = df_csv.apply(lambda r: f"{r['county_name']} ({r['fips_str']})", axis=1).tolist()
 
-default_idx = 0
-for idx, opt in enumerate(county_options):
-    if "(1001)" in opt:
-        default_idx = idx
-        break
+# Initialize session state for FIPS selection
+if 'fips_selection' not in st.session_state:
+    st.session_state['fips_selection'] = "1001"
 
-selected_county_option = st.selectbox("Select County by Name or FIPS:", options=county_options, index=default_idx)
-active_fips = selected_county_option.split("(")[-1].replace(")", "").strip()
-strip()
+def on_input_change():
+    val = st.session_state.get('user_search_input', '').strip()
+    if val:
+        extracted = ZIP_TO_FIPS.get(val, val)
         st.session_state['fips_selection'] = extracted
 
 # Calculate current dropdown index based on session state

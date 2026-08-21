@@ -4,8 +4,8 @@ import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults, userPlan } from '../store/appState'
-import { SYSTEM_BACKEND_URL } from '../config'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, locationRecords, mlPredictionResults, predictionModelResults, userPlan, toggleAiDrawer, ocrExtractedJson, mlInputPayload } from '../store/appState'
+import { SYSTEM_BACKEND_URL, RAG_BACKEND_URL } from '../config'
 
 const router = useRouter()
 
@@ -150,42 +150,91 @@ const communities = {
 }
 
 const selectedId = ref('cuyahoga')
-const selectedCommunity = computed(() => {
+
+const activeCommunity = computed(() => {
+  if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
+    const hasPred = !!predictionModelResults.value
+    const pred = predictionModelResults.value
+    const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
+    const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
+    
+    // Dynamic location extraction from uploaded locationRecords, patientData, OCR or prediction model
+    let locCounty = ''
+    let locState = ''
+    
+    if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
+      const firstLoc = locationRecords.value[0]
+      locCounty = firstLoc.county || firstLoc.name || ''
+      locState = firstLoc.state || ''
+    }
+    
+    if (!locCounty && patientData.value) {
+      locCounty = patientData.value.county || (patientData.value.locations && patientData.value.locations[0]?.county) || ''
+      locState = patientData.value.state || (patientData.value.locations && patientData.value.locations[0]?.state) || ''
+    }
+    
+    if (!locCounty && patientData.value?.locations_list && patientData.value.locations_list.length > 0) {
+      locCounty = patientData.value.locations_list[0][0] || ''
+      locState = patientData.value.locations_list[0][1] || ''
+    }
+    
+    if (!locCounty && ocrExtractedJson.value) {
+      locCounty = ocrExtractedJson.value.county || ocrExtractedJson.value.address || ''
+      locState = ocrExtractedJson.value.state || ''
+    }
+
+    if (!locCounty && hasPred) {
+      locCounty = pred.county || ''
+      locState = pred.state || ''
+    }
+
+    if (!locCounty) {
+      locCounty = 'King County'
+      locState = 'Washington'
+    }
+
+    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'WA'}`
+
+    return {
+      id: 'patient',
+      name: displayName,
+      state: locState || 'Washington',
+      population: '1 (Individual)',
+      sviScore: hasPred ? pred.overall_risk_score.toFixed(2) : '0.65',
+      sviLevel: hasPred ? pred.overall_risk_category : 'High Risk',
+      healthRisk: avgRisk.toFixed(2),
+      healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
+      foodAccess: hasPred ? pred.scores.food_security.toFixed(2) : '0.35',
+      foodAccessLevel: hasPred ? (pred.scores.food_security > 0.6 ? 'High Risk' : 'Moderate') : 'High Risk',
+      environmental: hasPred ? pred.scores.neighborhood_environment.toFixed(2) : '0.55',
+      environmentalLevel: hasPred ? (pred.scores.neighborhood_environment > 0.6 ? 'High' : 'Moderate') : 'High',
+      healthcareAccess: hasPred ? pred.scores.healthcare_access.toFixed(2) : '0.40',
+      healthcareAccessLevel: hasPred ? (pred.scores.healthcare_access > 0.6 ? 'Moderate' : 'Low') : 'Moderate',
+      equityScore: Math.round((1 - avgRisk) * 100),
+      equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
+      center: [parseFloat(patientData.value.lat) || 38.2917, parseFloat(patientData.value.long) || -76.5413],
+      bounds: [],
+      factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
+        ? mlPredictionResults.value.sdoh_barriers
+        : [
+            'Economic instability concerns',
+            'Healthcare access limitations',
+            'Transportation options shortage'
+          ]
+    }
+  }
   return communities[selectedId.value]
 })
 
-const patientCommunity = computed(() => {
-  const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-  const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
-  const hasPred = !!predictionModelResults.value
-  const pred = predictionModelResults.value
-  return {
-    id: 'patient',
-    name: patientData.value.name || 'Active Patient',
-    state: hasPred ? `${pred.city}, ${pred.state}` : 'Individual Assessment',
-    population: '1 (Individual)',
-    sviScore: hasPred ? pred.overall_risk_score.toFixed(2) : '0.65',
-    sviLevel: hasPred ? pred.overall_risk_category : 'High Risk',
-    healthRisk: avgRisk.toFixed(2),
-    healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
-    foodAccess: hasPred ? pred.scores.food_security.toFixed(2) : '0.35',
-    foodAccessLevel: hasPred ? (pred.scores.food_security > 0.6 ? 'High Risk' : 'Moderate') : 'High Risk',
-    environmental: hasPred ? pred.scores.neighborhood_environment.toFixed(2) : '0.55',
-    environmentalLevel: hasPred ? (pred.scores.neighborhood_environment > 0.6 ? 'High' : 'Moderate') : 'High',
-    healthcareAccess: hasPred ? pred.scores.healthcare_access.toFixed(2) : '0.40',
-    healthcareAccessLevel: hasPred ? (pred.scores.healthcare_access > 0.6 ? 'Moderate' : 'Low') : 'Moderate',
-    equityScore: Math.round((1 - avgRisk) * 100),
-    equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
-    center: [parseFloat(patientData.value.lat) || 41.4993, parseFloat(patientData.value.long) || -81.6944],
-    bounds: [],
-    factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
-      ? mlPredictionResults.value.sdoh_barriers
-      : [
-          'Economic instability concerns',
-          'Healthcare access limitations',
-          'Transportation options shortage'
-        ]
+const selectedCommunity = computed(() => {
+  if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
+    return activeCommunity.value
   }
+  return communities[selectedId.value] || activeCommunity.value
+})
+
+const patientCommunity = computed(() => {
+  return activeCommunity.value
 })
 
 // Compare metrics helper list
@@ -401,7 +450,7 @@ const handleConsultClick = () => {
   } else if (!userPlan.value) {
     router.push('/plan')
   } else {
-    showConsultAI.value = true
+    toggleAiDrawer(true)
   }
 }
 const chatInput = ref('')
@@ -422,9 +471,58 @@ const clickSuggestion = (suggest) => {
 }
 
 const formatMessageText = (text) => {
-  return text
+  if (!text) return ''
+
+  // 1. Process Markdown tables
+  let formatted = text.replace(/((?:\|[^\n]+\|\r?\n)+)/g, (match) => {
+    const lines = match.trim().split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) return match
+    
+    // Filter out separator line like |---|---|
+    const tableRows = lines.filter(l => !/^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/.test(l))
+    if (tableRows.length === 0) return match
+
+    let html = '<div class="chat-table-wrapper"><table class="chat-table">'
+    tableRows.forEach((rowStr, idx) => {
+      const cells = rowStr.split('|').map(c => c.trim()).slice(1, -1)
+      const tag = idx === 0 ? 'th' : 'td'
+      html += '<tr>' + cells.map(c => `<${tag}>${c}</${tag}>`).join('') + '</tr>'
+    })
+    html += '</table></div>'
+    return html
+  })
+
+  // 2. Bold text & line breaks outside HTML elements
+  formatted = formatted
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br/>')
+
+  return formatted
+}
+
+// Helper to extract or default county FIPS from user query or active patient data setup
+function resolveFipsFromQuery(text) {
+  const lower = text.toLowerCase()
+  if (lower.includes('cuyahoga')) return '39035'
+  if (lower.includes('wayne')) return '26163'
+  if (lower.includes('marion')) return '18097'
+  if (lower.includes('franklin')) return '39049'
+  if (lower.includes('autauga')) return '1001'
+  
+  const fipsMatch = text.match(/\b\d{4,5}\b/)
+  if (fipsMatch) return fipsMatch[0]
+
+  if (patientData.value && patientData.value.fips) return String(patientData.value.fips)
+  if (mlInputPayload.value && mlInputPayload.value.fips) return String(mlInputPayload.value.fips)
+  if (ocrExtractedJson.value && ocrExtractedJson.value.fips) return String(ocrExtractedJson.value.fips)
+
+  const address = (patientData.value?.address || ocrExtractedJson.value?.address || '').toLowerCase()
+  if (address.includes('cuyahoga')) return '39035'
+  if (address.includes('wayne')) return '26163'
+  if (address.includes('marion')) return '18097'
+  if (address.includes('franklin')) return '39049'
+
+  return '39035'
 }
 
 const handleSendMessage = () => {
@@ -441,25 +539,31 @@ const handleSendMessage = () => {
     if (el) el.scrollTop = el.scrollHeight
   }, 50)
 
-  // Try live FastAPI chat server first, fallback to mock simulation
-  const chatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
-  fetch(chatUrl, {
+  const activeFips = resolveFipsFromQuery(text)
+  const ragChatUrl = `${RAG_BACKEND_URL}/api/chat`
+
+  // Format message history for RAG API schema
+  const formattedHistory = messages.value
+    .slice(0, -1)
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: m.text }))
+
+  fetch(ragChatUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      role: 'user',
-      content: text
+      fips: activeFips,
+      question: text,
+      chat_history: formattedHistory
     })
   })
   .then(r => {
-    if (!r.ok) throw new Error('Live Chat API HTTP error: ' + r.status)
+    if (!r.ok) throw new Error('RAG Chat API HTTP error: ' + r.status)
     return r.json()
   })
   .then(data => {
     isThinking.value = false
-    const reply = data.response || 'No response received from agent.'
+    const reply = data.answer || 'No response received from RAG service.'
     messages.value.push({ role: 'assistant', text: reply })
     
     // Auto scroll
@@ -469,33 +573,56 @@ const handleSendMessage = () => {
     }, 50)
   })
   .catch(err => {
-    console.warn('Falling back to local simulated response:', err)
+    console.warn('Falling back to main system AI assistant:', err)
     
-    isThinking.value = false
-    let reply = ''
-    const lower = text.toLowerCase()
+    const systemChatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
+    fetch(systemChatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'user', content: text })
+    })
+    .then(r => {
+      if (!r.ok) throw new Error('System Chat API HTTP error: ' + r.status)
+      return r.json()
+    })
+    .then(data => {
+      isThinking.value = false
+      const reply = data.response || 'No response received from agent.'
+      messages.value.push({ role: 'assistant', text: reply })
+      
+      // Auto scroll
+      setTimeout(() => {
+        const el = document.querySelector('.ai-chat-content')
+        if (el) el.scrollTop = el.scrollHeight
+      }, 50)
+    })
+    .catch(() => {
+      isThinking.value = false
+      let reply = ''
+      const lower = text.toLowerCase()
 
-    if (lower.includes('wayne')) {
-      reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
-    } else if (lower.includes('cuyahoga')) {
-      reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
-    } else if (lower.includes('marion')) {
-      reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
-    } else if (lower.includes('franklin')) {
-      reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and the outer beltway. Environmental ozone warnings are active.'
-    } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
-      reply = 'Hello! I am your **CareEquity AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
-    } else {
-      reply = `Thank you for consulting me! Regarding "${text}", I am currently analyzing the SVI dataset across Cuyahoga, Wayne, Marion, and Franklin counties. Please specify which county or risk factor you would like me to drill down into.`
-    }
+      if (lower.includes('wayne')) {
+        reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
+      } else if (lower.includes('cuyahoga')) {
+        reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
+      } else if (lower.includes('marion')) {
+        reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
+      } else if (lower.includes('franklin')) {
+        reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and the outer beltway. Environmental ozone warnings are active.'
+      } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+        reply = 'Hello! I am your **CareEquity AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
+      } else {
+        reply = `Analyzing query: "${text}". Querying SDoH Knowledge Graph & PubMed RAG data... \n\nKey finding: Resource access index in Cuyahoga County (39035) & Wayne County (26163) highlights food and housing as primary drivers. Recommended clinical path: Deploy targeted mobile health units and community food partnerships.`
+      }
 
-    messages.value.push({ role: 'assistant', text: reply })
+      messages.value.push({ role: 'assistant', text: reply })
 
-    // Auto scroll
-    setTimeout(() => {
-      const el = document.querySelector('.ai-chat-content')
-      if (el) el.scrollTop = el.scrollHeight
-    }, 50)
+      // Auto scroll
+      setTimeout(() => {
+        const el = document.querySelector('.ai-chat-content')
+        if (el) el.scrollTop = el.scrollHeight
+      }, 50)
+    })
   })
 }
 </script>
@@ -847,6 +974,33 @@ const handleSendMessage = () => {
 </template>
 
 <style scoped>
+.chat-table-wrapper {
+  margin: 10px 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+:deep(.chat-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  text-align: left;
+}
+:deep(.chat-table th) {
+  background: rgba(59, 130, 246, 0.08);
+  font-weight: 700;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+}
+:deep(.chat-table td) {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+}
+:deep(.chat-table tr:last-child td) {
+  border-bottom: none;
+}
 .overview-layout {
   display: flex;
   height: 100%;

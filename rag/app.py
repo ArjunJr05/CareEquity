@@ -13,7 +13,12 @@ import json
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-from mcp_client import search_pubmed_sync   # kept for offline fallback only
+try:
+    from mcp_client import search_pubmed_sync   # kept for offline fallback only
+except Exception as e:
+    search_pubmed_sync = None
+    print(f"Warning: mcp_client import skipped ({e})")
+
 # bot.py helpers still used for offline fallback path
 from bot import ask_bot, build_county_context, classify_intent
 
