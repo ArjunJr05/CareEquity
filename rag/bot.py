@@ -36,9 +36,6 @@ def _get_county_df():
 # TASK 3 — ChromaDB Citation Cache
 # ══════════════════════════════════════════════════════════════════════════════
 
-import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-
 _chroma_client     = None
 _citation_cache    = None
 _CACHE_DIR         = os.path.join(os.path.dirname(__file__), ".chroma_cache")
@@ -46,18 +43,22 @@ _SIMILARITY_THRESH = 0.72   # cosine similarity — above this = cache hit
 
 
 def _get_cache():
-    """Lazy-init the ChromaDB collection. Returns the collection object."""
+    """
+    Lazy-init ChromaDB. Import happens here (not at module load) so that
+    FastAPI can import bot.py without triggering the ONNX model download.
+    """
     global _chroma_client, _citation_cache
     if _citation_cache is not None:
         return _citation_cache
     try:
-        _chroma_client  = chromadb.PersistentClient(path=_CACHE_DIR)
+        import chromadb as _chromadb
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction as _DEF
+        _chroma_client  = _chromadb.PersistentClient(path=_CACHE_DIR)
         _citation_cache = _chroma_client.get_or_create_collection(
             name="sdoh_citations",
-            embedding_function=DefaultEmbeddingFunction(),
+            embedding_function=_DEF(),
             metadata={"hnsw:space": "cosine"},
         )
-        # Remove any test/dummy articles that leaked in during development
         _purge_test_articles(_citation_cache)
     except Exception:
         _citation_cache = None

@@ -13,7 +13,8 @@ import json
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-from mcp_client import search_pubmed_sync   # kept for fallback path
+from mcp_client import search_pubmed_sync   # kept for offline fallback only
+# bot.py helpers still used for offline fallback path
 from bot import ask_bot, build_county_context, classify_intent
 
 # Page configuration
@@ -241,6 +242,46 @@ def fetch_sdoh_from_api(api_url, fips):
 def fetch_health_from_api(api_url, fips):
     try:
         resp = requests.get(f"{api_url}/api/county/{fips}/health-outcomes", timeout=3.0)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def fetch_county_context_from_api(api_url: str, fips: str) -> str | None:
+    """
+    GET /api/county/{fips}/context
+    Returns the fully assembled context string (CSV + Neo4j severity).
+    This is the single source of truth for everything the chatbot sees.
+    """
+    try:
+        resp = requests.get(f"{api_url}/api/county/{fips}/context", timeout=5.0)
+        if resp.status_code == 200:
+            return resp.json().get("context_text")
+    except Exception:
+        pass
+    return None
+
+
+def call_chat_api(api_url: str, fips: str, question: str,
+                  chat_history: list) -> dict | None:
+    """
+    POST /api/chat
+    Sends the question to the FastAPI chatbot endpoint.
+    Returns {answer, intent, sources_used} or None on failure.
+    """
+    try:
+        payload = {
+            "fips":         fips,
+            "question":     question,
+            "chat_history": chat_history,
+        }
+        resp = requests.post(
+            f"{api_url}/api/chat",
+            json=payload,
+            timeout=120.0,   # PubMed + LLM can take time
+        )
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -502,21 +543,30 @@ if "chat_messages" not in st.session_state:
 # ── Header row ────────────────────────────────────────────────────────────────
 col_title, col_clear = st.columns([8, 1])
 with col_title:
-    intent_icon = "🧠"
-    st.markdown(f"##### {intent_icon} NVIDIA AI Assistant — Analysing {c_name}, {c_state}")
+    st.markdown(f"##### 🧠 NVIDIA AI Assistant — Analysing {c_name}, {c_state}")
 with col_clear:
     if st.button("🗑️ Clear", key="clear_chat"):
         st.session_state.chat_messages = []
         st.rerun()
 
-# ── Build county context string (shared by every turn) ────────────────────────
-county_context = build_county_context(
-    c_name, c_state, c_pop, c_income, c_svi, sdoh_df, health_df
-)
+# ── County context: prefer FastAPI /context endpoint (includes Neo4j severity)
+# Fallback: build locally from CSV data if FastAPI is offline
+if use_fastapi:
+    county_context = fetch_county_context_from_api(FASTAPI_URL, active_fips)
+    if county_context is None:
+        # /context endpoint failed — build locally
+        county_context = build_county_context(
+            c_name, c_state, c_pop, c_income, c_svi, sdoh_df, health_df
+        )
+else:
+    county_context = build_county_context(
+        c_name, c_state, c_pop, c_income, c_svi, sdoh_df, health_df
+    )
 
 # ── Routing hint banner ───────────────────────────────────────────────────────
+api_label = "FastAPI + Neo4j Knowledge Graph" if use_fastapi else "CSV Fallback Mode"
 st.markdown(
-    """
+    f"""
     <div style="
         background: rgba(99,102,241,0.15);
         border: 1px solid rgba(99,102,241,0.35);
@@ -526,9 +576,9 @@ st.markdown(
         font-size: 0.88rem;
         color: #c7d2fe;
     ">
-    💡 <b>Smart routing active:</b>
-    &nbsp;Ask about <b>risk factors / data</b> → answered from the Knowledge Graph.
-    &nbsp;Ask about <b>care, treatment, or interventions</b> → searches PubMed for evidence.
+    💡 <b>Smart routing active</b> &nbsp;|&nbsp; Data source: <b>{api_label}</b><br>
+    Ask about <b>risk factors / data</b> → Knowledge Graph &nbsp;|&nbsp;
+    Ask about <b>care or interventions</b> → PubMed evidence
     </div>
     """,
     unsafe_allow_html=True,
@@ -559,121 +609,95 @@ if user_query := st.chat_input("Ask about risk factors, care, interventions, or 
 
             # Live status updates fed back into the same placeholder
             def update_status(msg: str):
-                # Remap ASCII prefixes (used in bot.py for console safety)
-                # back to friendly emoji for Streamlit display
                 msg = (msg
                     .replace("[KG]",      "🔍")
                     .replace("[BOT]",     "📋")
                     .replace("[PubMed]",  "📚")
                     .replace("[Writing]", "✍️")
+                    .replace("[Cache]",   "⚡")
                     .replace(">>",        "🧠")
                 )
                 placeholder.markdown(msg)
 
             try:
-                # ── Call the NVIDIA bot ───────────────────────────────────────
-                answer, updated_history = ask_bot(
-                    user_question    = user_query,
-                    county_context   = county_context,
-                    chat_history     = [
-                        m for m in st.session_state.chat_messages
-                        if m["role"] in ("user", "assistant")
-                    ][:-1],          # exclude the message we just appended
-                    status_callback  = update_status,
-                )
+                # ── Route through FastAPI /api/chat when online ───────────────
+                # This uses the full server-side context (CSV + Neo4j severity).
+                # Falls back to direct bot.py call if FastAPI is offline.
+                if use_fastapi:
+                    placeholder.markdown("🔗 *Connecting to FastAPI knowledge graph...*")
+                    api_result = call_chat_api(
+                        api_url      = FASTAPI_URL,
+                        fips         = active_fips,
+                        question     = user_query,
+                        chat_history = [
+                            m for m in st.session_state.chat_messages
+                            if m["role"] in ("user", "assistant")
+                        ][:-1],
+                    )
+                    if api_result:
+                        answer  = api_result["answer"]
+                        intent  = api_result.get("intent", "unknown")
+                        sources = api_result.get("sources_used", 0)
+                        placeholder.markdown(answer)
+                    else:
+                        # FastAPI returned error — fall through to direct call
+                        raise RuntimeError("FastAPI /api/chat returned no result")
+                else:
+                    raise RuntimeError("FastAPI offline — using direct bot")
 
-                # Render the final formatted answer
-                placeholder.markdown(answer)
-
-                # Persist only user + assistant display messages
-                st.session_state.chat_messages = [
-                    m for m in st.session_state.chat_messages
-                    if m["role"] in ("user", "assistant")
-                    and m not in [{"role": "user", "content": user_query}]
-                ]
-                # Re-attach current user message + new assistant answer
-                st.session_state.chat_messages.append(
-                    {"role": "user", "content": user_query}
-                )
-                st.session_state.chat_messages.append(
-                    {"role": "assistant", "content": answer}
-                )
-
-            except Exception as exc:
-                # ── Graceful fallback: direct KG context + raw PubMed ────────
-                intent = classify_intent(user_query)
-                fallback_parts = []
-
-                fallback_parts.append(
-                    f"⚠️ *NVIDIA API unavailable ({type(exc).__name__}). "
-                    f"Showing direct data instead.*\n"
-                )
-
-                # Always show elevated risk factors from the KG context
-                elevated = []
-                if sdoh_df is not None and not sdoh_df.empty:
-                    for _, row in sdoh_df.iterrows():
-                        try:
-                            val    = float(row.get("County Value", 0))
-                            us_avg = float(row.get("US National Average", 0))
-                            if val > us_avg:
-                                elevated.append({
-                                    "factor": row.get("SDoH Barrier Factor", ""),
-                                    "val":    val,
-                                    "avg":    us_avg,
-                                    "diff":   val - us_avg,
-                                    "unit":   row.get("Unit", ""),
-                                })
-                        except Exception:
-                            pass
-                elevated.sort(key=lambda x: x["diff"], reverse=True)
-
-                if elevated:
-                    fallback_parts.append(f"### ⚠️ Elevated Risk Factors in {c_name}\n")
-                    for r in elevated[:5]:
-                        fallback_parts.append(
-                            f"- **{r['factor']}**: {r['val']}{r['unit']} "
-                            f"(US avg: {r['avg']}{r['unit']}, "
-                            f"+{r['diff']:.1f} above average)\n"
-                        )
-
-                # If care/mixed, still try PubMed directly
-                if intent in ("care", "mixed"):
-                    try:
-                        update_status("📚 *Falling back to direct PubMed search…*")
-                        pubmed_raw = search_pubmed_sync(
-                            f"{user_query} {c_name}", max_results=3
-                        )
-                        if pubmed_raw and "Error" not in pubmed_raw:
+            except Exception:
+                # ── Direct bot.py call (offline fallback) ─────────────────────
+                try:
+                    answer, _ = ask_bot(
+                        user_question    = user_query,
+                        county_context   = county_context,
+                        chat_history     = [
+                            m for m in st.session_state.chat_messages
+                            if m["role"] in ("user", "assistant")
+                        ][:-1],
+                        status_callback  = update_status,
+                    )
+                    placeholder.markdown(answer)
+                except Exception as exc2:
+                    # ── Last-resort fallback: show raw data ───────────────────
+                    intent = classify_intent(user_query)
+                    fallback_parts = [
+                        f"⚠️ *Service unavailable ({type(exc2).__name__}). "
+                        f"Showing direct data instead.*\n"
+                    ]
+                    elevated = []
+                    if sdoh_df is not None and not sdoh_df.empty:
+                        for _, row in sdoh_df.iterrows():
+                            try:
+                                val    = float(row.get("County Value", 0))
+                                us_avg = float(row.get("US National Average", 0))
+                                if val > us_avg:
+                                    elevated.append({
+                                        "factor": row.get("SDoH Barrier Factor",""),
+                                        "val": val, "avg": us_avg,
+                                        "diff": val - us_avg,
+                                        "unit": row.get("Unit",""),
+                                    })
+                            except Exception:
+                                pass
+                    elevated.sort(key=lambda x: x["diff"], reverse=True)
+                    if elevated:
+                        fallback_parts.append(f"### Elevated Risk Factors in {c_name}\n")
+                        for r in elevated[:5]:
                             fallback_parts.append(
-                                "\n### 📚 PubMed Search Results\n"
+                                f"- **{r['factor']}**: {r['val']}{r['unit']} "
+                                f"(US avg: {r['avg']}{r['unit']}, "
+                                f"+{r['diff']:.1f} above average)\n"
                             )
-                            for block in pubmed_raw.split("\n\n"):
-                                block = block.strip()
-                                if not block:
-                                    continue
-                                pmid_m = re.search(r"PMID[:\s]+(\d+)", block)
-                                lines  = [l.strip() for l in block.split("\n") if l.strip()]
-                                title  = lines[1] if len(lines) > 1 else lines[0]
-                                title  = title.split("doi:")[0].strip()
-                                if pmid_m:
-                                    pmid = pmid_m.group(1)
-                                    fallback_parts.append(
-                                        f"**{title}**  \n"
-                                        f"[Read on PubMed (PMID {pmid})]"
-                                        f"(https://pubmed.ncbi.nlm.nih.gov/{pmid}/)\n\n"
-                                    )
-                                else:
-                                    fallback_parts.append(f"**{title}**\n\n")
-                    except Exception as mcp_exc:
-                        fallback_parts.append(
-                            f"\n*PubMed search also failed: {mcp_exc}*\n"
-                        )
+                    answer = "\n".join(fallback_parts)
+                    placeholder.markdown(answer)
 
-                fallback_answer = "\n".join(fallback_parts)
-                placeholder.markdown(fallback_answer)
-
-                st.session_state.chat_messages.append(
-                    {"role": "assistant", "content": fallback_answer}
-                )
+            # ── Persist the answer to session state ───────────────────────────
+            st.session_state.chat_messages = [
+                m for m in st.session_state.chat_messages
+                if m["role"] in ("user", "assistant")
+                and m != {"role": "user", "content": user_query}
+            ]
+            st.session_state.chat_messages.append({"role": "user",      "content": user_query})
+            st.session_state.chat_messages.append({"role": "assistant", "content": answer})
 
