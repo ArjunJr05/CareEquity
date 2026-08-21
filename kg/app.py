@@ -299,19 +299,7 @@ ZIP_TO_FIPS = {
     "94102": "6075", "94103": "6075", "94107": "6075", "94110": "6075", # San Francisco, CA
     "30301": "13121", "30303": "13121", "30305": "13121", "30309": "13121", # Fulton County, GA
     "10001": "36061", "10002": "36061", "10011": "36061", "10019": "36061", # New York County, NY
-    "33101": "12086", "33139": "12086", "33140": "12086", # Miami-Dade County, FL
-    "60601": "17031", "60602": "17031", "60606": "17031", # Cook County, IL
-    "77001": "48201", "77002": "48201", "77004": "48201", # Harris County, TX
-    "98101": "53033", "98104": "53033", "98109": "53033", # King County, WA
-}
-
-if 'fips_selection' not in st.session_state:
-    st.session_state['fips_selection'] = "1001"
-
-# Selection Controls
-col_search1, col_search2 = st.columns([1, 2])
-
-# Load county list for autocomplete (from FastAPI if available, else pandas)
+    "33101": "12086", "33139": "12086", "33140": "12086", # Miami-# Load county list for autocomplete (from FastAPI if available, else pandas)
 api_counties = fetch_counties_from_api(FASTAPI_URL) if use_fastapi else None
 
 if api_counties:
@@ -319,17 +307,15 @@ if api_counties:
 else:
     county_options = df_csv.apply(lambda r: f"{r['county_name']} ({r['fips_str']})", axis=1).tolist()
 
-def on_input_change():
-    val = st.session_state.get('user_search_input', '').strip()
-    if val in ZIP_TO_FIPS:
-        st.session_state['fips_selection'] = ZIP_TO_FIPS[val]
-    elif val in df_csv['fips_str'].values:
-        st.session_state['fips_selection'] = val
+default_idx = 0
+for idx, opt in enumerate(county_options):
+    if "(1001)" in opt:
+        default_idx = idx
+        break
 
-def on_dropdown_change():
-    selected_opt = st.session_state.get('user_dropdown_select', '')
-    if "(" in selected_opt and ")" in selected_opt:
-        extracted = selected_opt.split("(")[-1].replace(")", "").strip()
+selected_county_option = st.selectbox("Select County by Name or FIPS:", options=county_options, index=default_idx)
+active_fips = selected_county_option.split("(")[-1].replace(")", "").strip()
+strip()
         st.session_state['fips_selection'] = extracted
 
 # Calculate current dropdown index based on session state

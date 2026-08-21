@@ -107,8 +107,15 @@ def predict_endpoint(payload: Dict[str, Any] = Body(...)):
     POST /predict
     Crash-proof endpoint for multi-label disease prediction (ml_pipelineV2.pkl).
     Accepts raw OCR patient medical data, target_locations list-of-lists [[county, state, country]], and medical conditions.
+    Logs input JSON, model processing step, output JSON, and errors directly to docker/terminal logs.
     """
+    print("\n" + "="*80, flush=True)
+    print("📥 [ML SERVICE] RECEIVED CONSOLIDATED INPUT JSON PAYLOAD:", flush=True)
+    print(json.dumps(payload, indent=2), flush=True)
+    print("="*80, flush=True)
+
     try:
+        print("⚙️ [ML SERVICE] Initializing ML Model Pipeline (ml_pipelineV2.pkl)...", flush=True)
         pipeline = get_pipeline()
         
         # Handle list of lists locations [[county, state, country], ...]
@@ -132,10 +139,21 @@ def predict_endpoint(payload: Dict[str, Any] = Body(...)):
         if locations:
             payload["locations"] = locations
             
+        print(f"🔄 [ML SERVICE] Processing prediction across {len(locations)} location(s) using ml_pipelineV2.pkl...", flush=True)
         output = pipeline.predict(payload)
+        
+        print("\n" + "="*80, flush=True)
+        print("📤 [ML SERVICE] GENERATED MODEL PREDICTION OUTPUT JSON:", flush=True)
+        print(json.dumps(output, indent=2), flush=True)
+        print("="*80 + "\n", flush=True)
+        
         return output
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        error_msg = f"Prediction error: {str(e)}"
+        print("\n" + "❌"*40, flush=True)
+        print(f"❌ [ML SERVICE ERROR] {error_msg}", flush=True)
+        print("❌"*40 + "\n", flush=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn

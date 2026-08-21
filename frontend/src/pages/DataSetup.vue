@@ -160,14 +160,17 @@ const isDragOver = ref(false)
 // Custom Toast Banner State
 const toast = ref({
   visible: false,
-  title: 'Oops!',
-  message: ''
+  title: '',
+  message: '',
+  type: 'success'
 })
 let toastTimer = null
 
-const showToast = (title, message) => {
+const showToast = (title, message, type = 'success') => {
   if (toastTimer) clearTimeout(toastTimer)
-  toast.value = { visible: true, title, message }
+  // Auto-detect error type if title contains error or missing
+  const finalType = (type === 'error' || title.toLowerCase().includes('error') || title.toLowerCase().includes('missing') || title.toLowerCase().includes('oops')) ? 'error' : 'success'
+  toast.value = { visible: true, title, message, type: finalType }
   toastTimer = setTimeout(() => {
     toast.value.visible = false
   }, 5000)
@@ -970,10 +973,21 @@ const handleAnalyze = async () => {
     <!-- Custom Pop-Up Toast Modal (Single Line Banner, Auto-close 5s) -->
     <transition name="toast-fade">
       <div v-if="toast.visible" class="custom-toast-overlay" style="position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 99999; display: flex; justify-content: center; pointer-events: auto;">
-        <div class="custom-toast-box" style="background: #ffffff; border-radius: 50px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); padding: 8px 16px 8px 10px; border: 1.5px solid #fee2e2; border-bottom: 3px solid #ef4444; display: flex; align-items: center; gap: 10px; white-space: nowrap; max-width: 90vw;">
-          <!-- Red Circle with X Icon -->
-          <div style="width: 28px; height: 28px; border-radius: 50%; background: #fee2e2; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+        <div class="custom-toast-box" 
+             style="background: #ffffff; border-radius: 50px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); padding: 8px 16px 8px 10px; display: flex; align-items: center; gap: 10px; white-space: nowrap; max-width: 90vw; transition: all 0.2s ease;"
+             :style="toast.type === 'error' ? { border: '1.5px solid #fee2e2', borderBottom: '3px solid #ef4444' } : { border: '1.5px solid #dcfce7', borderBottom: '3px solid #22c55e' }">
+          
+          <!-- Icon Circle (Green Checkmark for success, Red X for error) -->
+          <div :style="toast.type === 'error' ? { background: '#fee2e2' } : { background: '#dcfce7' }" 
+               style="width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            
+            <!-- Green Checkmark Icon -->
+            <svg v-if="toast.type !== 'error'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            
+            <!-- Red X Icon -->
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
@@ -1073,22 +1087,6 @@ const handleAnalyze = async () => {
               <p class="form-sub" style="margin: 4px 0 0; font-size: 0.78rem; color: var(--text-secondary);">Choose a source below to open the data entry form, or view your history below.</p>
             </div>
 
-            <!-- OCR Backend Status Test Button -->
-            <button 
-              @click="checkOcrBackendHealth" 
-              :disabled="ocrStatus.checking"
-              style="padding: 6px 14px; font-size: 0.78rem; font-weight: 600; border-radius: 8px; border: 1px solid #cbd5e1; background: #ffffff; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.15s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"
-              onmouseenter="this.style.borderColor='#94a3b8'; this.style.background='#f8fafc';"
-              onmouseleave="this.style.borderColor='#cbd5e1'; this.style.background='#ffffff';"
-            >
-              <span 
-                style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
-                :style="{
-                  background: ocrStatus.healthy === true ? '#22c55e' : (ocrStatus.healthy === false ? '#ef4444' : '#94a3b8')
-                }"
-              ></span>
-              <span>{{ ocrStatus.checking ? 'Testing OCR...' : 'Check OCR Backend Status' }}</span>
-            </button>
           </div>
 
           <!-- Template Cards Grid (Excel-like equal 5 boxes grid layout) -->
@@ -1150,21 +1148,21 @@ const handleAnalyze = async () => {
               <div class="form-grid">
                 <!-- Patient Name -->
                 <div class="form-field" :class="{ error: errors.name, 'ocr-extracted': ocrExtractedFields.name }">
-                  <label>Name * <span v-if="ocrExtractedFields.name" class="ocr-tag">AI Extracted</span></label>
+                  <label>Name * </label>
                   <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" />
                   <span v-if="errors.name" class="err-msg">Name is required</span>
                 </div>
 
                 <!-- Age -->
                 <div class="form-field" :class="{ error: errors.age, 'ocr-extracted': ocrExtractedFields.age }">
-                  <label>Age * <span v-if="ocrExtractedFields.age" class="ocr-tag">AI Extracted</span></label>
+                  <label>Age *</label>
                   <input type="number" v-model="form.age" placeholder="e.g., 54" class="setup-input" />
                   <span v-if="errors.age" class="err-msg">Age is required</span>
                 </div>
 
                 <!-- Gender -->
                 <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.gender }">
-                  <label>Gender * <span v-if="ocrExtractedFields.gender" class="ocr-tag">AI Extracted</span></label>
+                  <label>Gender *</label>
                   <div class="select-wrapper">
                     <select v-model="form.gender" class="setup-select">
                       <option>Female</option>
@@ -1177,7 +1175,7 @@ const handleAnalyze = async () => {
 
                 <!-- Diabetes -->
                 <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.diabetes }">
-                  <label>Diabetes * <span v-if="ocrExtractedFields.diabetes" class="ocr-tag">AI Extracted</span></label>
+                  <label>Diabetes *</label>
                   <div class="select-wrapper">
                     <select v-model="form.diabetes" class="setup-select">
                       <option>No</option>
@@ -1189,7 +1187,7 @@ const handleAnalyze = async () => {
 
                 <!-- Hypertension -->
                 <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.hypertension }">
-                  <label>Hypertension * <span v-if="ocrExtractedFields.hypertension" class="ocr-tag">AI Extracted</span></label>
+                  <label>Hypertension *</label>
                   <div class="select-wrapper">
                     <select v-model="form.hypertension" class="setup-select">
                       <option>No</option>
@@ -1201,7 +1199,7 @@ const handleAnalyze = async () => {
 
                 <!-- Heart Disease -->
                 <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.heart_disease }">
-                  <label>Heart Disease * <span v-if="ocrExtractedFields.heart_disease" class="ocr-tag">AI Extracted</span></label>
+                  <label>Heart Disease *</label>
                   <div class="select-wrapper">
                     <select v-model="form.heart_disease" class="setup-select">
                       <option>No</option>
@@ -1213,7 +1211,7 @@ const handleAnalyze = async () => {
 
                 <!-- Asthma -->
                 <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.asthma }">
-                  <label>Asthma * <span v-if="ocrExtractedFields.asthma" class="ocr-tag">AI Extracted</span></label>
+                  <label>Asthma *</label>
                   <div class="select-wrapper">
                     <select v-model="form.asthma" class="setup-select">
                       <option>No</option>
@@ -1225,14 +1223,14 @@ const handleAnalyze = async () => {
 
                 <!-- Height (cm) -->
                 <div class="form-field" :class="{ error: errors.height_cm, 'ocr-extracted': ocrExtractedFields.height_cm }">
-                  <label>Height (cm) * <span v-if="ocrExtractedFields.height_cm" class="ocr-tag">AI Extracted</span></label>
+                  <label>Height (cm) *</label>
                   <input type="number" v-model="form.height_cm" placeholder="e.g., 170" class="setup-input" />
                   <span v-if="errors.height_cm" class="err-msg">Height is required</span>
                 </div>
 
                 <!-- Weight (kg) -->
                 <div class="form-field" :class="{ error: errors.weight_kg, 'ocr-extracted': ocrExtractedFields.weight_kg }">
-                  <label>Weight (kg) * <span v-if="ocrExtractedFields.weight_kg" class="ocr-tag">AI Extracted</span></label>
+                  <label>Weight (kg) *</label>
                   <input type="number" v-model="form.weight_kg" placeholder="e.g., 70" class="setup-input" />
                   <span v-if="errors.weight_kg" class="err-msg">Weight is required</span>
                 </div>
@@ -1314,41 +1312,8 @@ const handleAnalyze = async () => {
               <p class="secure-footer-text"><img src="/assets/insurance.png" alt="Secure Icon" class="secure-img-icon" /> Your data is secure and encrypted</p>
             </div>
 
-            <!-- Consolidated Unified JSON Display Panel -->
-            <div style="margin-top: 16px; background: #0f172a; border-radius: 10px; border: 1px solid #1e293b; overflow: hidden;">
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #6366f1;"></span>
-                  <h4 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #f8fafc; font-family: monospace;">Consolidated Patient & Location JSON</h4>
-                </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600; font-family: monospace;">Locations: {{ form.locations.length }}</span>
-                  <button 
-                    v-if="ocrRawJson"
-                    type="button" 
-                    @click="ocrRawJson = null"
-                    style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600;"
-                  >
-                    ✕ Clear OCR
-                  </button>
-                </div>
-              </div>
-              <pre style="margin: 0; padding: 16px; max-height: 320px; overflow-y: auto; color: #38bdf8; font-size: 0.78rem; font-family: 'Fira Code', 'Courier New', monospace; line-height: 1.4; white-space: pre-wrap;">{{ JSON.stringify({
-                patient_data: {
-                  name: form.name,
-                  age: form.age,
-                  gender: form.gender,
-                  diabetes: form.diabetes,
-                  hypertension: form.hypertension,
-                  heart_disease: form.heart_disease,
-                  asthma: form.asthma,
-                  height_cm: form.height_cm,
-                  weight_kg: form.weight_kg
-                },
-                target_locations: form.locations.map(loc => [loc.county || '', loc.state || '', loc.country || '']),
-                ocr_extracted_response: ocrRawJson || null
-              }, null, 2) }}</pre>
-            </div>
+           
+            
           </div>
 
           <!-- Assessment History Section (Higher container with Excel-style subtabs) -->

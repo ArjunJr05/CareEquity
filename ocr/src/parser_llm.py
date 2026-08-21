@@ -43,8 +43,10 @@ class LLMPatientDetailsParser(MedicalDocParser):
 
         # Map new schema to existing dataclass structure
         patient_info = PatientInfo(
+            name=extraction.get("demographics", {}).get("patient_name"),
             age=extraction.get("demographics", {}).get("age"),
             gender=extraction.get("demographics", {}).get("sex"),
+            address=str(extraction.get("target_locations")) if extraction.get("target_locations") else None
         )
         
         vital_signs = VitalSigns(
@@ -60,8 +62,7 @@ class LLMPatientDetailsParser(MedicalDocParser):
         # Put lab values in clinical context notes
         lab_data = {
             **extraction.get("metabolic_panel", {}),
-            **extraction.get("kidney_panel", {}), 
-            **extraction.get("blood_liver_panel", {})
+            **extraction.get("liver_panel", {})
         }
         
         clinical_context = ClinicalContext(
@@ -95,18 +96,15 @@ class LLMPatientDetailsParser(MedicalDocParser):
             context_hint = "No clear numerical values found - extract any available demographic info"
 
         json_template = (
-            '{"demographics":{"age":null,"sex":null,"race_ethnicity":null,"smoking_status":null,'
+            '{"demographics":{"patient_name":null,"age":null,"sex":null,"race_ethnicity":null,"smoking_status":null,'
             '"alcohol_use":null,"sedentary_time_min":null},'
+            '"target_locations":[["county","state","country"]],'
             '"vitals":{"height_cm":null,"weight_kg":null,"bmi":null,"waist_circumference_cm":null,'
             '"systolic_bp_mmhg":null,"diastolic_bp_mmhg":null,"resting_heart_rate_bpm":null},'
             '"metabolic_panel":{"hba1c_percent":null,"fasting_glucose_mgdl":null,'
             '"total_cholesterol_mgdl":null,"ldl_cholesterol_mgdl":null,"hdl_cholesterol_mgdl":null,'
             '"triglycerides_mgdl":null},'
-            '"kidney_panel":{"creatinine_mgdl":null,"egfr_ml_min":null,"bun_mgdl":null,'
-            '"urine_albumin_mgl":null,"urine_creatinine_mgdl":null,"acr_mgg":null},'
-            '"blood_liver_panel":{"hemoglobin_gdl":null,"hematocrit_percent":null,'
-            '"wbc_count_k_ul":null,"platelet_count_k_ul":null,"mcv_fl":null,"alt_ul":null,'
-            '"ast_ul":null,"albumin_gdl":null,"total_bilirubin_mgdl":null}}'
+            '"liver_panel":{"alt_ul":null,"ast_ul":null,"albumin_gdl":null,"total_bilirubin_mgdl":null}}'
         )
 
         # Optimized prompt for medical value extraction
