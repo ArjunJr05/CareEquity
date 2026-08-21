@@ -222,10 +222,81 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     edges_list: List[Dict[str, Any]] = []
 
     if not driver:
-        # Fallback response if DB driver is offline
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Neo4j Graph Database is not connected."
+        # Generate graph dynamically from local CSV dataset if Neo4j is offline
+        c_row = county_match.iloc[0]
+        nodes_dict['County'] = {
+            'id': f"county_{fips}",
+            'label': str(c_row['county_name']),
+            'type': 'County',
+            'color': '#6366f1',
+            'size': 42,
+            'title': f"<b>{c_row['county_name']}</b><br>FIPS: {fips}<br>Population: {int(c_row['population']):,}<br>Income: ${float(c_row['median_household_income']):,.0f}<br>SVI Score: {float(c_row['svi_overall']):.4f}"
+        }
+
+        # State Node
+        state_id = f"state_{c_row['state_abbr']}"
+        nodes_dict['State'] = {
+            'id': state_id,
+            'label': f"State: {c_row['state_abbr']}",
+            'type': 'State',
+            'color': '#3b82f6',
+            'size': 26,
+            'title': f"State: {c_row['state_abbr']}"
+        }
+        edges_list.append({
+            'from': nodes_dict['County']['id'],
+            'to': state_id,
+            'label': 'IN_STATE',
+            'color': '#94a3b8',
+            'width': 2,
+            'dashes': True,
+            'title': 'State Link'
+        })
+
+        # SDoH Factors from CSV
+        sdoh_cols = [
+            ("Poverty Rate", 'poverty_rate', 15.1),
+            ("Unemployment Rate", 'unemployment_rate', 5.16),
+            ("No Vehicle Rate", 'no_vehicle_rate', 6.20),
+            ("Lack of Health Insurance", 'lack_health_insurance', 11.57),
+            ("Food Insecurity", 'food_insecurity', 16.87),
+            ("Housing Insecurity", 'housing_insecurity', 13.66)
+        ]
+
+        for idx, (label, col, avg) in enumerate(sdoh_cols[:top_k]):
+            val = float(c_row[col]) if col in c_row and not pd.isna(c_row[col]) else avg
+            n_id = f"sdoh_{label.replace(' ', '_')}"
+            diff = val - avg
+            color = '#ef4444' if diff > 2 else ('#10b981' if diff < -2 else '#f59e0b')
+            sev = 'High Risk' if diff > 2 else ('Protective' if diff < -2 else 'Moderate')
+
+            nodes_dict[n_id] = {
+                'id': n_id,
+                'label': f"{label}\n({val:.1f}%)",
+                'type': 'SDoHFactor',
+                'color': color,
+                'size': 30,
+                'title': f"<b>SDoH Feature: {label}</b><br>Value: {val:.2f}%<br>National Avg: {avg:.2f}%<br>Status: <b>{sev}</b>"
+            }
+
+            edges_list.append({
+                'from': nodes_dict['County']['id'],
+                'to': n_id,
+                'label': f"{val:.1f}%",
+                'color': color,
+                'width': 3,
+                'dashes': False,
+                'title': f"Status: {sev}"
+            })
+
+        nodes_formatted = [NodeModel(**n) for n in nodes_dict.values()]
+        edges_formatted = [EdgeModel(**e) for e in edges_list]
+
+        return GraphResponse(
+            fips=str(fips),
+            county_name=county_name,
+            nodes=nodes_formatted,
+            edges=edges_formatted
         )
 
     cypher_query = """
