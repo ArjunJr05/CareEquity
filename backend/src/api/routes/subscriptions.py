@@ -101,6 +101,8 @@ def get_latest_subscription(
     user_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
+    if db is None:
+        return None
     query = db.query(Subscription)
     if user_id:
         query = query.filter(Subscription.user_id == user_id)
