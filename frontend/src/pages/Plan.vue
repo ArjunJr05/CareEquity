@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { userPlan, setUserPlan } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
-import { LOGO_BASE64 } from '../assets/logoBase64.js'
 
 const router = useRouter()
 const isYearly = ref(false)
@@ -93,23 +92,15 @@ const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, order
 const selectPlan = async (planKey, title) => {
   const currentCycle = planKey === 'free' ? '15_days' : (isYearly.value ? 'yearly' : 'monthly')
 
-  // 1. If FREE plan, activate directly without payment checkout
-  if (planKey === 'free') {
-    setUserPlan('free')
-    selectedPlanTitle.value = title
-    paymentDetails.value = { razorpay_payment_id: 'free_trial_15_days' }
-    showConfirmationModal.value = true
-    await saveSubscriptionToBackend('free', '15_days', 'free_trial_15_days')
-    return
-  }
-
-  // 2. For paid plans (BASIC / PRO), initiate Razorpay Checkout
+  // Initiate Razorpay Checkout for all plans
   isProcessingPayment.value = true
   await loadRazorpaySDK()
 
-  const targetPlan = plans.value.find(p => p.key === planKey)
-  const monthlyOrYearlyPrice = isYearly.value ? targetPlan.yearlyPrice * 12 : targetPlan.monthlyPrice
-  const amountInPaise = Math.round(monthlyOrYearlyPrice * 100)
+  const targetPlan = plans.value.find(p => p.key === planKey) || { monthlyPrice: 0, yearlyPrice: 0 }
+  const rawPrice = isYearly.value ? (targetPlan.yearlyPrice * 12) : targetPlan.monthlyPrice
+  // Razorpay minimum charge is ₹1 token auth for free trial verification, or plan price for paid plans
+  const chargeAmount = planKey === 'free' ? 1 : Math.max(1, rawPrice)
+  const amountInPaise = Math.round(chargeAmount * 100)
 
   let razorpayOrderId = null
   let activeKeyId = RAZORPAY_KEY_ID
@@ -122,7 +113,7 @@ const selectPlan = async (planKey, title) => {
       body: JSON.stringify({
         plan: planKey,
         billing_cycle: currentCycle,
-        amount: monthlyOrYearlyPrice,
+        amount: chargeAmount,
         user_email: localStorage.getItem('user_email') || 'doctor@careequity.com'
       })
     })
@@ -137,14 +128,26 @@ const selectPlan = async (planKey, title) => {
     console.warn('Backend payment order fallback:', err)
   }
 
+  const activateFallbackSubscription = async () => {
+    isProcessingPayment.value = false
+    const fallbackPayId = `pay_sim_${Math.random().toString(36).substring(2, 10)}`
+    await saveSubscriptionToBackend(planKey, currentCycle, fallbackPayId)
+    setUserPlan(planKey)
+    selectedPlanTitle.value = title
+    paymentDetails.value = { razorpay_payment_id: fallbackPayId }
+    showConfirmationModal.value = true
+  }
+
   const options = {
     key: activeKeyId,
     amount: amountInPaise,
     currency: 'INR',
     name: 'CareEquity',
-    description: `${title} Plan (${isYearly.value ? 'Billed Yearly' : 'Billed Monthly'})`,
-    image: LOGO_BASE64,
-    order_id: razorpayOrderId || undefined,
+    description: planKey === 'free' 
+      ? '15-Day Free Trial Activation (Token Auth ₹1)' 
+      : `${title} Plan (${isYearly.value ? 'Billed Yearly' : 'Billed Monthly'})`,
+    image: (typeof window !== 'undefined' ? window.location.origin : '') + '/assets/careequity_logo.png',
+    ...(razorpayOrderId ? { order_id: razorpayOrderId } : {}),
     handler: async function (response) {
       isProcessingPayment.value = false
       await saveSubscriptionToBackend(
@@ -176,17 +179,19 @@ const selectPlan = async (planKey, title) => {
   }
 
   if (window.Razorpay) {
-    const rzp = new window.Razorpay(options)
-    rzp.open()
+    try {
+      const rzp = new window.Razorpay(options)
+      rzp.on('payment.failed', function (response) {
+        console.error('Razorpay payment failed:', response.error)
+        isProcessingPayment.value = false
+      })
+      rzp.open()
+    } catch (err) {
+      console.warn('Razorpay checkout initialization error:', err)
+      await activateFallbackSubscription()
+    }
   } else {
-    // Fallback if Razorpay SDK script is blocked
-    isProcessingPayment.value = false
-    const fallbackPayId = `pay_fallback_${Math.random().toString(36).substring(2, 10)}`
-    await saveSubscriptionToBackend(planKey, currentCycle, fallbackPayId)
-    setUserPlan(planKey)
-    selectedPlanTitle.value = title
-    paymentDetails.value = { razorpay_payment_id: fallbackPayId }
-    showConfirmationModal.value = true
+    await activateFallbackSubscription()
   }
 }
 
@@ -568,21 +573,20 @@ const plans = computed(() => {
 </template>
 
 <style scoped>
-/* Main Page Setup - Strictly Non-scrollable Full-screen Layout */
+/* Main Page Setup - Fully Scrollable Responsive Layout */
 .plan-page {
-  height: 100vh;
-  max-height: 100vh;
-  width: 100vw;
-  max-width: 100vw;
+  min-height: 100vh;
+  width: 100%;
   background: linear-gradient(180deg, #f0f6ff 0%, #f7fafc 45%, #e8f2fe 100%);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: #1e293b;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   box-sizing: border-box;
+  padding-bottom: 24px;
 }
 
 /* Background elements */
@@ -685,15 +689,13 @@ const plans = computed(() => {
   z-index: 10;
   max-width: 1180px;
   margin: 0 auto;
-  padding: 0 24px 8px;
+  padding: 0 24px 16px;
   width: 100%;
   box-sizing: border-box;
   flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Title Section */
@@ -899,12 +901,11 @@ const plans = computed(() => {
 .features-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 16px;
+  margin: 0 0 20px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   flex: 1;
-  overflow-y: auto;
 }
 
 .feature-item {

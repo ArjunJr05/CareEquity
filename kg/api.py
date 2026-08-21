@@ -208,6 +208,7 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     """
     Queries Neo4j Aura Graph Database for central County node, connected State,
     and top K SDoH risk factors affecting the specified county.
+    Automatically falls back to rich dataset when Neo4j is offline.
     """
     if df_csv is None or df_csv.empty:
         raise HTTPException(status_code=500, detail="County dataset not loaded.")
@@ -216,7 +217,8 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     if county_match.empty:
         raise HTTPException(status_code=404, detail=f"County FIPS {fips} not found.")
 
-    county_name = county_match.iloc[0]['county_name']
+    c_row = county_match.iloc[0]
+    county_name = c_row['county_name']
 
     nodes_dict: Dict[str, Dict[str, Any]] = {}
     edges_list: List[Dict[str, Any]] = []
@@ -358,56 +360,87 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
                 val = r_props.get('value', 0)
                 sev = r_props.get('severity', 'Medium')
 
-                if 'High Risk' in sev:
-                    prio = 0
-                elif 'Medium' in sev:
-                    prio = 1
-                else:
-                    prio = 2
+        if st_abbr:
+            n_id = f"state_{st_abbr}"
+            nodes_dict['State'] = {
+                'id': n_id,
+                'label': f"State: {st_abbr}",
+                'type': 'State',
+                'color': '#3b82f6',
+                'size': 26,
+                'title': f"State: {st_abbr}"
+            }
+            edges_list.append({
+                'from': nodes_dict['County']['id'],
+                'to': n_id,
+                'label': 'IN_STATE',
+                'color': '#94a3b8',
+                'width': 2,
+                'dashes': True,
+                'title': 'State Link'
+            })
 
+        sdoh_config = [
+            ("Poverty Rate", 'poverty_rate', "%", 15.1, 'Economic'),
+            ("Unemployment Rate", 'unemployment_rate', "%", 5.16, 'Economic'),
+            ("No Vehicle Rate", 'no_vehicle_rate', "%", 6.20, 'Transportation'),
+            ("Internet Access Gap", 'internet_subscription_rate', "%", 82.5, 'Infrastructure'),
+            ("Lack of Health Insurance", 'lack_health_insurance', "%", 11.57, 'Healthcare'),
+            ("Food Insecurity", 'food_insecurity', "%", 16.87, 'Nutrition'),
+            ("Transportation Barrier", 'transportation_barrier', "%", 9.23, 'Transportation'),
+            ("Housing Insecurity", 'housing_insecurity', "%", 13.66, 'Housing'),
+            ("Low Food Access Pct", 'low_access_population_pct_2019', "%", 24.30, 'Nutrition'),
+            ("SNAP Low Access Pct", 'snap_low_access_pct_2019', "%", 7.89, 'Nutrition'),
+            ("Fast Food Density", 'fast_food_per_1000_2020', "per 1k", 0.67, 'Nutrition'),
+            ("Grocery Store Density", 'grocery_stores_per_1000_2020', "per 1k", 0.21, 'Nutrition')
+        ]
+
+        sdoh_factors_list = []
+        for label, col, unit, us_avg, category in sdoh_config:
+            if col in c_row and not pd.isna(c_row[col]):
+                val = float(c_row[col])
+                diff = ((val - us_avg) / max(abs(us_avg), 0.001)) * 100
+                if col == 'internet_subscription_rate':
+                    sev = "High Risk" if val < (us_avg - 10) else ("Medium Risk" if val < us_avg else "Low Risk")
+                elif col == 'grocery_stores_per_1000_2020':
+                    sev = "High Risk" if val < (us_avg * 0.7) else ("Medium Risk" if val < us_avg else "Low Risk")
+                else:
+                    sev = "High Risk" if diff > 15 else ("Medium Risk" if diff > 0 else "Low Risk")
+
+                prio = 0 if 'High' in sev else (1 if 'Medium' in sev else 2)
                 sdoh_factors_list.append({
-                    'factor_name': f['name'],
-                    'category': f.get('category', 'SDoH'),
+                    'factor_name': label,
+                    'category': category,
                     'value': val,
                     'severity': sev,
                     'priority': prio
                 })
 
-    # Pick top K SDoH factors
-    sdoh_factors_list.sort(key=lambda x: x['priority'])
-    top_factors = sdoh_factors_list[:top_k]
+        sdoh_factors_list.sort(key=lambda x: x['priority'])
+        for factor in sdoh_factors_list[:top_k]:
+            fname = factor['factor_name']
+            val = factor['value']
+            sev = factor['severity']
+            n_id = f"sdoh_{fname.replace(' ', '_')}"
+            color = '#ef4444' if 'High' in sev else ('#10b981' if 'Low' in sev else '#f59e0b')
 
-    for factor in top_factors:
-        fname = factor['factor_name']
-        val = factor['value']
-        sev = factor['severity']
-        n_id = f"sdoh_{fname}"
-
-        if 'High Risk' in sev:
-            color = '#ef4444'  # Red
-        elif 'Low' in sev or 'Protective' in sev:
-            color = '#10b981'  # Green
-        else:
-            color = '#f59e0b'  # Amber
-
-        nodes_dict[n_id] = {
-            'id': n_id,
-            'label': f"{fname}\n({val:.1f})",
-            'type': 'SDoHFactor',
-            'color': color,
-            'size': 30,
-            'title': f"<b>SDoH Feature: {fname}</b><br>Category: {factor['category']}<br>Value: {val:.2f}<br>Severity: <b>{sev}</b>"
-        }
-
-        edges_list.append({
-            'from': nodes_dict['County']['id'],
-            'to': n_id,
-            'label': f"{val:.1f}",
-            'color': color,
-            'width': 3,
-            'dashes': False,
-            'title': f"Severity: {sev}"
-        })
+            nodes_dict[n_id] = {
+                'id': n_id,
+                'label': f"{fname}\n({val:.1f})",
+                'type': 'SDoHFactor',
+                'color': color,
+                'size': 30,
+                'title': f"<b>SDoH Feature: {fname}</b><br>Category: {factor['category']}<br>Value: {val:.2f}<br>Severity: <b>{sev}</b>"
+            }
+            edges_list.append({
+                'from': nodes_dict['County']['id'],
+                'to': n_id,
+                'label': f"{val:.1f}",
+                'color': color,
+                'width': 3,
+                'dashes': False,
+                'title': f"Severity: {sev}"
+            })
 
     nodes_formatted = [NodeModel(**n) for n in nodes_dict.values()]
     edges_formatted = [EdgeModel(**e) for e in edges_list]

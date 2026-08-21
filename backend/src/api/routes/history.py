@@ -29,13 +29,39 @@ def save_assessment_history(
     history_in: AssessmentHistoryCreate,
     db: Session = Depends(get_db)
 ):
-    # Find user or fallback to first user in database
-    user = db.query(User).filter(User.id == history_in.user_id).first()
+    from sqlalchemy import func
+    from ...core.security import get_password_hash
+
+    user = None
+
+    # 1. Try finding user by email if provided
+    if history_in.user_email:
+        clean_email = history_in.user_email.strip().lower()
+        user = db.query(User).filter(func.lower(User.email) == clean_email).first()
+
+    # 2. Try finding user by user_id if provided
+    if not user and history_in.user_id:
+        user = db.query(User).filter(User.id == history_in.user_id).first()
+
+    # 3. If user not in DB yet but an email was provided, auto-create user record
+    if not user and history_in.user_email:
+        clean_email = history_in.user_email.strip().lower()
+        display_name = clean_email.split("@")[0].capitalize()
+        user = User(
+            name=display_name,
+            email=clean_email,
+            hashed_password=get_password_hash("CareEquity2026!"),
+            status=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    # 4. Fallback to first user in database or create default
     if not user:
         user = db.query(User).first()
         if not user:
-            # Create a default system user if none exists
-            user = User(name="Default User", email="user@careequity.com", hashed_password="defaultpassword", status=True)
+            user = User(name="Care Navigator", email="doctor@careequity.com", hashed_password=get_password_hash("CareEquity2026!"), status=True)
             db.add(user)
             db.commit()
             db.refresh(user)
@@ -98,7 +124,9 @@ def get_history_by_email(
     email: str,
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.email == email).first()
+    from sqlalchemy import func
+    clean_email = email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == clean_email).first()
     if user:
         history = (
             db.query(AssessmentHistory)

@@ -36,10 +36,10 @@ def create_order(req: CreateOrderRequest):
     """
     Creates a Razorpay order structure.
     If official razorpay library is installed and keys are set, uses razorpay client.
-    Otherwise generates standard Razorpay test order payload.
+    Otherwise returns order_id as None for client-side direct checkout.
     """
     amount_in_paise = int(req.amount * 100)
-    order_id = f"order_{uuid.uuid4().hex[:14]}"
+    order_id = None
     
     try:
         import razorpay
@@ -54,9 +54,11 @@ def create_order(req: CreateOrderRequest):
             }
         }
         rzp_order = client.order.create(data=order_data)
-        order_id = rzp_order.get("id", order_id)
+        if rzp_order and "id" in rzp_order:
+            order_id = rzp_order["id"]
     except Exception as e:
-        print(f"Razorpay SDK note (using fallback test order): {e}")
+        print(f"Razorpay order creation fallback (using direct checkout mode): {e}")
+        order_id = None
 
     return {
         "status": "success",

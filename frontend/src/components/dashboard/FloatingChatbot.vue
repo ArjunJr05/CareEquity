@@ -1,7 +1,11 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBase from './IconBase.vue'
+import { isLoggedIn, setShowLoginScreen, userPlan } from '../../store/appState'
 import { SYSTEM_BACKEND_URL } from '../../config'
+
+const router = useRouter()
 
 const isOpen = ref(false)
 const activeTab = ref('overview') // 'overview' or 'chat'
@@ -24,6 +28,14 @@ const quickPrompts = [
 ]
 
 function toggleChat() {
+  if (!isLoggedIn.value) {
+    setShowLoginScreen(true)
+    return
+  }
+  if (!userPlan.value) {
+    router.push('/plan')
+    return
+  }
   isOpen.value = !isOpen.value
 }
 

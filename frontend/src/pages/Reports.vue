@@ -1,8 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload, userPlan } from '../store/appState'
+
 import { MAIN_BACKEND_URL } from '../config'
+
+const router = useRouter()
 
 // Active configuration state
 const activeGeography = ref('Cuyahoga County, OH')
@@ -771,6 +775,10 @@ function exportPDF() {
     setShowLoginScreen(true)
     return
   }
+  if (!userPlan.value) {
+    router.push('/plan')
+    return
+  }
   if (isAnalyzed.value) {
     triggerToast('Generating Patient Report PDF...')
     downloadPatientReport()
@@ -782,6 +790,10 @@ function exportPDF() {
 function exportCSV() {
   if (!isLoggedIn.value) {
     setShowLoginScreen(true)
+    return
+  }
+  if (!userPlan.value) {
+    router.push('/plan')
     return
   }
   triggerToast('Downloading CSV data...')

@@ -3,7 +3,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { setLoggedIn, setShowLoginScreen, setAdmin, userPlan, setUserPlan } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
-import { LOGO_BASE64 } from '../assets/logoBase64.js'
 
 const router = useRouter()
 
@@ -88,21 +87,13 @@ const selectPlan = async (planId, title) => {
   setUserPlan(planId)
   const currentCycle = planId === 'free' ? '15_days' : billingCycle.value
 
-  if (planId === 'free') {
-    await saveLoginSubscription('free', '15_days', 'free_trial_15_days')
-    showToast(`Subscribed to FREE plan! Welcome to CareEquity.`, 'success')
-    setTimeout(() => {
-      finishLogin()
-    }, 800)
-    return
-  }
-
   await loadRazorpaySDK()
   const prices = {
+    free: 1,
     basic: billingCycle.value === 'yearly' ? 1068 : 99,
     pro: billingCycle.value === 'yearly' ? 2904 : 269
   }
-  const planPrice = prices[planId] || 99
+  const planPrice = prices[planId] || 1
   const amountInPaise = Math.round(planPrice * 100)
 
   let razorpayOrderId = null
@@ -130,9 +121,9 @@ const selectPlan = async (planId, title) => {
     amount: amountInPaise,
     currency: 'INR',
     name: 'CareEquity',
-    description: `${title || planId.toUpperCase()} Plan (${billingCycle.value === 'yearly' ? 'Billed Yearly' : 'Billed Monthly'})`,
-    image: LOGO_BASE64,
-    order_id: razorpayOrderId || undefined,
+    description: planId === 'free' ? '15-Day Free Trial Authorization' : `${title || planId.toUpperCase()} Plan (${billingCycle.value === 'yearly' ? 'Billed Yearly' : 'Billed Monthly'})`,
+    image: (typeof window !== 'undefined' ? window.location.origin : '') + '/assets/careequity_logo.png',
+    ...(razorpayOrderId ? { order_id: razorpayOrderId } : {}),
     handler: async function (response) {
       await saveLoginSubscription(
         planId,
@@ -275,11 +266,7 @@ const handleSignIn = async () => {
       const data = await response.json()
       showToast('Successfully authenticated! Welcome to CareEquity.', 'success')
       // Save session info
-      localStorage.setItem('docpat_logged_in', 'true')
-      if (data.id) localStorage.setItem('user_id', data.id)
-      localStorage.setItem('user_email', data.email)
-      localStorage.setItem('user_name', data.name)
-      setLoggedIn(true)
+      setLoggedIn(true, data)
       setShowLoginScreen(false)
       setTimeout(() => {
         router.push('/')
@@ -368,17 +355,13 @@ const handleVerifyOTP = async () => {
       showToast(errData.detail || 'OTP verification failed.', 'error')
     } else {
       const data = await response.json()
-      showToast('OTP verified! Welcome to CareEquity.', 'success')
+      showToast('OTP verified! Choose your subscription plan.', 'success')
       // Save session info
-      localStorage.setItem('docpat_logged_in', 'true')
-      if (data.id) localStorage.setItem('user_id', data.id)
-      localStorage.setItem('user_email', data.email)
-      localStorage.setItem('user_name', data.name)
-      setLoggedIn(true)
+      setLoggedIn(true, data)
       setShowLoginScreen(false)
       setTimeout(() => {
-        router.push('/')
-      }, 500)
+        router.push('/plan')
+      }, 400)
     }
   } catch (error) {
     showToast('Could not connect to authentication server.', 'error')
