@@ -8,9 +8,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb
-      RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
-      RAZORPAY_KEY_SECRET: 6CpEEmS1w4qzyi6A1lYwdETj
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -37,7 +37,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
+      VITE_RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
     depends_on:
       - main-backend
     restart: unless-stopped
@@ -77,12 +77,14 @@ services:
     env_file:
       - ./rag/.env
     environment:
-      - NEO4J_URI=neo4j+s://8357afa1.databases.neo4j.io
-      - NEO4J_USERNAME=8357afa1
-      - NEO4J_PASSWORD=zY1Fk-hmxuF02rmC9M8aYLYAqfTj3-AvErXJObPJafE
-      - NEO4J_DATABASE=8357afa1
-      - AURA_INSTANCEID=8357afa1
-      - AURA_INSTANCENAME=Instance01
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-8357afa1}
+      - AURA_INSTANCEID=${AURA_INSTANCEID:-8357afa1}
+      - AURA_INSTANCENAME=${AURA_INSTANCENAME:-Instance01}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - FASTAPI_URL=http://localhost:8002
@@ -111,6 +113,9 @@ services:
       - "8003:8000"
     env_file:
       - ./research_assis/.env
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
     restart: unless-stopped
     healthcheck:
       test:
