@@ -42,10 +42,16 @@ jobs:
 
       - name: Clean disk space before build
         run: |
-          docker system prune -af --volumes || true
+          echo "=== Disk space before cleanup ==="
+          df -h
+          docker container prune -f || true
+          docker image prune -af || true
+          docker volume prune -f || true
           docker builder prune -af || true
-          rm -rf ~/.cache/pip ~/.npm /tmp/* || true
+          sudo rm -rf /tmp/* /var/tmp/* ~/.cache/pip ~/.npm || true
           sudo apt-get clean || true
+          echo "=== Disk space after cleanup ==="
+          df -h
 
       - name: Build and Start CareEquity Multi-Container Stack
         run: |
