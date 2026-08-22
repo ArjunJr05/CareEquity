@@ -82,10 +82,21 @@ jobs:
           echo "=== Disk space after cleanup ==="
           df -h
 
-      - name: Build and Start CareEquity Multi-Container Stack
-        timeout-minutes: 15
+      - name: Ensure Swap space exists (Prevents OOM exit code 137)
         run: |
-          docker compose up -d --build --remove-orphans
+          if ! grep -q '/swapfile' /proc/swaps; then
+            sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile || true
+          fi
+
+      - name: Build and Start CareEquity Multi-Container Stack
+        timeout-minutes: 20
+        run: |
+          export DOCKER_BUILDKIT=1
+          docker compose build --parallel
+          docker compose up -d --remove-orphans
 
       - name: Verify Running Containers
         run: |
