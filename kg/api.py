@@ -360,7 +360,8 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
                 val = r_props.get('value', 0)
                 sev = r_props.get('severity', 'Medium')
 
-        if st_abbr:
+        st_abbr = str(c_row['state_abbr']) if 'state_abbr' in c_row and not pd.isna(c_row['state_abbr']) else ''
+        if st_abbr and 'State' not in nodes_dict:
             n_id = f"state_{st_abbr}"
             nodes_dict['State'] = {
                 'id': n_id,

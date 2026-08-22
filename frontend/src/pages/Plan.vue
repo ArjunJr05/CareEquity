@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userPlan, setUserPlan, setShowLoginScreen } from '../store/appState'
+import { userPlan, setUserPlan, setShowLoginScreen, isLoggedIn } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
 
 const router = useRouter()
@@ -10,6 +10,10 @@ const showConfirmationModal = ref(false)
 const selectedPlanTitle = ref('')
 const paymentDetails = ref(null)
 const isProcessingPayment = ref(false)
+
+const activeSub = computed(() => {
+  return isLoggedIn.value ? userPlan.value : null
+})
 
 const loadRazorpaySDK = () => {
   return new Promise((resolve) => {
@@ -281,7 +285,7 @@ const defaultPlans = [
       'Basic PDF & CSV report exports',
       'Email helpdesk support'
     ],
-    buttonText: 'Subscribed',
+    buttonText: 'Select Basic',
     buttonClass: 'btn-primary',
     isPopular: true
   },
@@ -320,7 +324,7 @@ const plans = computed(() => {
         yearlyPrice: Number(dp.yearlyPrice ?? match.yearlyPrice ?? 0),
         subtitle: dp.subtitle || match.subtitle,
         features: dp.features && dp.features.length > 0 ? dp.features : (match.features || []),
-        buttonText: dp.key === 'free' ? 'Start Free' : (userPlan.value === dp.key ? 'Subscribed' : (dp.key === 'basic' ? 'Get Basic' : 'Get Pro')),
+        buttonText: dp.key === 'free' ? 'Start Free' : (activeSub.value === dp.key ? 'Subscribed' : (dp.key === 'basic' ? 'Select Basic' : 'Get Pro')),
         buttonClass: dp.key === 'free' ? 'btn-outline' : 'btn-primary',
         isPopular: dp.isPopular !== undefined ? dp.isPopular : (match.isPopular || false)
       }
@@ -457,11 +461,11 @@ const plans = computed(() => {
           v-for="plan in plans" 
           :key="plan.key" 
           class="plan-card"
-          :class="{ 'active-plan': userPlan === plan.key }"
+          :class="{ 'active-plan': activeSub === plan.key }"
         >
           <!-- Featured Header Badges -->
           <div class="badge-tag tag-popular" v-if="plan.isPopular">MOST POPULAR</div>
-          <div class="badge-tag tag-your-plan" v-if="userPlan === plan.key">Your Plan</div>
+          <div class="badge-tag tag-your-plan" v-if="activeSub === plan.key">Your Plan</div>
 
           <div class="card-body">
             <div>
@@ -517,10 +521,10 @@ const plans = computed(() => {
             <!-- Action Button -->
             <button 
               class="action-btn"
-              :class="[plan.buttonClass, { 'btn-subscribed': userPlan === plan.key }]"
+              :class="[plan.buttonClass, { 'btn-subscribed': activeSub === plan.key }]"
               @click="selectPlan(plan.key, plan.title)"
             >
-              <template v-if="userPlan === plan.key">
+              <template v-if="activeSub === plan.key">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
                   <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>

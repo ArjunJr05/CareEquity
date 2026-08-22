@@ -840,7 +840,7 @@ function handleLocationFilterChange(e) {
               
               <!-- Circular Progress Gauge -->
               <div class="radial-gauge-wrapper">
-                <svg width="120" height="120" viewBox="0 0 36 36" class="premium-gauge">
+                <svg width="120" height="120" viewBox="0 0 36 36" class="premium-gauge" style="transform: rotate(-90deg);">
                   <!-- Background Track -->
                   <path class="gauge-track" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#f1f5f9" stroke-width="2.5" />
                   <!-- Foreground Gradient Bar -->
@@ -853,7 +853,7 @@ function handleLocationFilterChange(e) {
                   </defs>
                 </svg>
                 <div class="gauge-inner-text">
-                  <span class="score-number">{{ patientSidebarData.equityScore }}</span>
+                  <span class="score-number">{{ patientSidebarData.equityScore }}%</span>
                   <span class="score-total">/100</span>
                 </div>
               </div>

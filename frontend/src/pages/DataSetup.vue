@@ -14,7 +14,7 @@ const userName = computed(() => {
 })
 
 const planBadgeText = computed(() => {
-  if (!userPlan.value) return 'Choose Plan'
+  if (!isLoggedIn.value || !userPlan.value) return 'Choose Plan'
   return `${userPlan.value.toUpperCase()} Plan`
 })
 
@@ -109,6 +109,9 @@ const viewHistoryItem = (item) => {
       lat: item.lat || item.extra_data?.lat || 41.4993,
       long: item.long || item.extra_data?.long || -81.6944,
       medication_adherence: item.medication_adherence || item.extra_data?.medication_adherence || 85,
+      height_cm: item.height_cm || item.extra_data?.height_cm || 170.0,
+      weight_kg: item.weight_kg || item.extra_data?.weight_kg || 70.0,
+      notes: item.notes || item.extra_data?.notes || '',
       county: item.county || item.extra_data?.county || 'Cuyahoga County',
       state: item.state || item.extra_data?.state || 'OH'
     })
@@ -120,9 +123,18 @@ const viewHistoryItem = (item) => {
     if (item.extra_data?.prediction_model || item.prediction_model) {
       setPredictionModelResults(item.extra_data?.prediction_model || item.prediction_model)
     }
+    if (item.extra_data?.ocr_extracted || item.ocr_extracted) {
+      setOcrExtractedJson(item.extra_data?.ocr_extracted || item.ocr_extracted)
+    }
+    if (item.extra_data?.ml_input_payload || item.ml_input_payload) {
+      setMlInputPayload(item.extra_data?.ml_input_payload || item.ml_input_payload)
+    }
+    if (item.extra_data?.agent_report || item.agent_report) {
+      setAgentReport(item.extra_data?.agent_report || item.agent_report)
+    }
   }
   setAnalyzed(true)
-  router.push('/')
+  router.push('/overview')
 }
 
 const formatDate = (isoStr) => {
@@ -949,12 +961,18 @@ const handleAnalyze = async () => {
     }
   })()
 
-  // Execute all fetches in parallel
-  Promise.all([savePatientPromise, mlPredictionPromise, predictionModelPromise]).then(async () => {
-    console.log('🏁 All DataSetup API calls completed!')
+  // Execute all service fetches in parallel (ML, RAG/KG, Agent, Prediction Model, Database Save)
+  Promise.allSettled([savePatientPromise, mlPredictionPromise, predictionModelPromise, agentBackendPromise]).then(async () => {
+    console.log('🏁 All DataSetup pipeline service calls completed!')
     apisCompleted = true
+    analysisProgress.value = 100
+  })
 
-    // Persist full report data to PostgreSQL if user is logged in
+  // Fallback safety timeout (ensure auto-completion even if external network delays occur)
+  setTimeout(() => {
+    apisCompleted = true
+  }, 3500)
+
     if (isLoggedIn.value) {
       try {
         const primaryLoc = form.value.locations[0] || { country: 'United States', state: 'Kansas', county: 'Trego County' }
@@ -988,6 +1006,9 @@ const handleAnalyze = async () => {
             all_locations: form.value.locations,
             ml_prediction: mlPredictionResults.value,
             prediction_model: predictionModelResults.value,
+            ocr_extracted: ocrExtractedJson.value,
+            ml_input_payload: mlInputPayload.value,
+            agent_report: agentReport.value,
             saved_at: new Date().toISOString()
           }
         }
@@ -1004,15 +1025,10 @@ const handleAnalyze = async () => {
     } else {
       console.log('User is logged out: Assessment history not saved to database.')
     }
-  })
 
   // Loading bar animation sequence
   const interval = setInterval(() => {
-    if (analysisProgress.value < 90) {
-      analysisProgress.value += 1
-    } else if (apisCompleted) {
-      analysisProgress.value += 2
-    }
+    analysisProgress.value += 3
     
     // Update steps based on progress
     if (analysisProgress.value < 20) activeStep.value = 0
@@ -1023,11 +1039,14 @@ const handleAnalyze = async () => {
 
     if (analysisProgress.value >= 100) {
       clearInterval(interval)
-      // Done processing: Unlock dashboard and redirect to Overview
+      analysisProgress.value = 100
+      activeStep.value = 4
+      // Done processing: Unlock dashboard and redirect to Overview page
       setAnalyzed(true)
-      router.push('/')
+      isAnalyzing.value = false
+      router.push('/overview')
     }
-  }, 40)
+  }, 50)
 }
 </script>
 
