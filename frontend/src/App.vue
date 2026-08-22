@@ -58,7 +58,7 @@ onMounted(async () => {
 
 <template>
   <!-- 1. Explicitly requested full-screen views (Login, DataSetup, Plan) -->
-  <div v-if="route.path === '/login' || route.path === '/setup' || route.path === '/plan'" class="full-page-container">
+  <div v-if="route.path === '/login' || route.path === '/setup' || route.path === '/' || route.path === '/plan'" class="full-page-container">
     <router-view />
   </div>
 
