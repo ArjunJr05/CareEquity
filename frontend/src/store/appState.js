@@ -8,8 +8,15 @@ export const mlPredictionResults = ref(null)
 export const predictionModelResults = ref(null)
 export const ocrExtractedJson = ref(null)
 export const mlInputPayload = ref(null)
+export const agentReport = ref(null)
+export const isAgentLoading = ref(false)
 export const locationRecords = ref([]) // Array supporting up to 5 uploaded locations
 export const isAiDrawerOpen = ref(false)
+
+export function setAgentReport(report) {
+  agentReport.value = report
+}
+
 
 export function setLocationRecords(records) {
   if (Array.isArray(records)) {

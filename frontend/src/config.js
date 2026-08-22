@@ -20,4 +20,9 @@ export const RAG_BACKEND_URL = isLocal
   ? 'http://localhost:8002' 
   : 'http://localhost:8002';
 
+export const AGENT_BACKEND_URL = isLocal
+  ? 'http://localhost:8003'
+  : 'http://localhost:8003';
+
 export const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TRtTOuWOsWyK15';
+
