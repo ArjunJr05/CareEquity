@@ -114,6 +114,15 @@ defineProps({
         d="M9 4h4v2.1a1.9 1.9 0 1 0 0 3.8V12h4v3.9a1.9 1.9 0 1 1 0 3.8V20H9v-3.9a1.9 1.9 0 1 0 0-3.8V9H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4Z"
       />
     </template>
+    <template v-else-if="name === 'refresh'">
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </template>
+    <template v-else-if="name === 'maximize'">
+      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+    </template>
     <template v-else-if="name === 'sparkle'">
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
       <path d="m6.5 6.5 2 2M15.5 15.5l2 2M17.5 6.5l-2 2M8.5 15.5l-2 2" />
