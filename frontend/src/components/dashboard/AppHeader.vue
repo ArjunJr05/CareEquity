@@ -16,7 +16,7 @@ const userName = computed(() => {
 })
 
 const planBadgeText = computed(() => {
-  if (!userPlan.value) return 'Choose Plan'
+  if (!isLoggedIn.value || !userPlan.value) return 'Choose Plan'
   return `${userPlan.value.toUpperCase()} Plan`
 })
 

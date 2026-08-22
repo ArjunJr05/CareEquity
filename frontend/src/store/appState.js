@@ -77,7 +77,7 @@ export const currentUserName = ref(localStorage.getItem('user_name') || '')
 export const currentUserEmail = ref(localStorage.getItem('user_email') || '')
 export const currentUserId = ref(localStorage.getItem('user_id') || '')
 
-export const userPlan = ref(localStorage.getItem('user_plan') || null)
+export const userPlan = ref((localStorage.getItem('docpat_logged_in') === 'true') ? (localStorage.getItem('user_plan') || null) : null)
 export const userTokensAllocated = ref(parseInt(localStorage.getItem('tokens_allocated') || '250000'))
 export const userTokensUsed = ref(parseInt(localStorage.getItem('tokens_used') || '0'))
 export const isTokenLimitReached = ref(false)
