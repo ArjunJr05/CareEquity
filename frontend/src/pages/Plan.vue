@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userPlan, setUserPlan } from '../store/appState'
+import { userPlan, setUserPlan, setShowLoginScreen } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
 
 const router = useRouter()
@@ -93,7 +93,7 @@ const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, order
 const selectPlan = async (planKey, title) => {
   const currentCycle = planKey === 'free' ? '15_days' : (isYearly.value ? 'yearly' : 'monthly')
 
-  // FREE Plan: Directly activate without Razorpay payment modal
+  // FREE Plan: Directly activate without Razorpay payment modal or login check
   if (planKey === 'free') {
     isProcessingPayment.value = true
     const freePayId = 'free_trial_15_days'
@@ -106,7 +106,15 @@ const selectPlan = async (planKey, title) => {
     return
   }
 
-  // Paid Plans (Basic / Pro): Initiate Razorpay Checkout
+  // Paid Plans (Basic / Pro): If NOT logged in, redirect to login page first!
+  const loggedInState = localStorage.getItem('docpat_logged_in') === 'true'
+  if (!loggedInState) {
+    setShowLoginScreen(true)
+    router.push('/login')
+    return
+  }
+
+  // User is Logged In: Initiate Razorpay Checkout for Basic / Pro
   isProcessingPayment.value = true
   await loadRazorpaySDK()
 
