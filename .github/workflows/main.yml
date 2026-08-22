@@ -100,7 +100,7 @@ jobs:
         timeout-minutes: 20
         run: |
           export DOCKER_BUILDKIT=1
-          docker compose build --parallel
+          docker compose build
           docker compose up -d --remove-orphans
 
       - name: Verify Running Containers
