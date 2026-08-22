@@ -215,8 +215,33 @@ const activeCommunity = computed(() => {
   if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
     const hasPred = !!predictionModelResults.value
     const pred = predictionModelResults.value
-    const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-    const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
+    
+    // Extract multi-label disease risk probabilities from mlPredictionResults V2 or compute dynamic risk
+    let risk = { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
+    if (mlPredictionResults.value?.risk_scores) {
+      risk = mlPredictionResults.value.risk_scores
+    } else if (patientData.value) {
+      // Dynamic baseline risk score calculation based on patient age, BMI, and medical history
+      const ageVal = parseInt(patientData.value.age) || 45
+      const h = parseFloat(patientData.value.height_cm) || 170
+      const w = parseFloat(patientData.value.weight_kg) || 70
+      const bmiVal = w / ((h / 100) ** 2)
+      
+      const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.25) + (bmiVal > 30 ? 0.15 : 0.05) + (ageVal > 50 ? 0.10 : 0.0)
+      const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.80 : 0.30) + (ageVal > 55 ? 0.15 : 0.05)
+      const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.85 : 0.20) + (ageVal > 60 ? 0.15 : 0.05)
+      const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.70 : 0.20)
+
+      risk = {
+        diabetes: Math.min(0.95, Math.max(0.05, parseFloat(diabBase.toFixed(2)))),
+        hypertension: Math.min(0.95, Math.max(0.05, parseFloat(hyperBase.toFixed(2)))),
+        heart_disease: Math.min(0.95, Math.max(0.05, parseFloat(heartBase.toFixed(2)))),
+        asthma: Math.min(0.95, Math.max(0.05, parseFloat(asthmaBase.toFixed(2))))
+      }
+    }
+
+    const riskValues = Object.values(risk)
+    const avgRisk = riskValues.reduce((a, b) => a + b, 0) / riskValues.length
     
     // Dynamic location extraction from uploaded locationRecords, patientData, OCR or prediction model
     let locCounty = ''
@@ -249,30 +274,36 @@ const activeCommunity = computed(() => {
     }
 
     if (!locCounty) {
-      locCounty = 'King County'
-      locState = 'Washington'
+      locCounty = "St. Mary's"
+      locState = 'Maryland'
     }
 
-    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'WA'}`
+    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'MD'}`
+
+    // Calculate dynamic SDoH / environment scores
+    const sviVal = hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3))
+    const foodAccessVal = hasPred ? pred.scores.food_security : Math.max(0.15, 0.85 - (avgRisk * 0.5))
+    const envVal = hasPred ? pred.scores.neighborhood_environment : (0.40 + (avgRisk * 0.25))
+    const healthAccessVal = hasPred ? pred.scores.healthcare_access : Math.max(0.20, 0.90 - (avgRisk * 0.4))
 
     return {
       id: 'patient',
       name: displayName,
-      state: locState || 'Washington',
+      state: locState || 'Maryland',
       population: '1 (Individual)',
-      sviScore: hasPred ? pred.overall_risk_score.toFixed(2) : '0.65',
-      sviLevel: hasPred ? pred.overall_risk_category : 'High Risk',
+      sviScore: sviVal.toFixed(2),
+      sviLevel: sviVal > 0.65 ? 'High Risk' : (sviVal > 0.40 ? 'Medium' : 'Low Risk'),
       healthRisk: avgRisk.toFixed(2),
       healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
-      foodAccess: hasPred ? pred.scores.food_security.toFixed(2) : '0.35',
-      foodAccessLevel: hasPred ? (pred.scores.food_security > 0.6 ? 'High Risk' : 'Moderate') : 'High Risk',
-      environmental: hasPred ? pred.scores.neighborhood_environment.toFixed(2) : '0.55',
-      environmentalLevel: hasPred ? (pred.scores.neighborhood_environment > 0.6 ? 'High' : 'Moderate') : 'High',
-      healthcareAccess: hasPred ? pred.scores.healthcare_access.toFixed(2) : '0.40',
-      healthcareAccessLevel: hasPred ? (pred.scores.healthcare_access > 0.6 ? 'Moderate' : 'Low') : 'Moderate',
+      foodAccess: foodAccessVal.toFixed(2),
+      foodAccessLevel: foodAccessVal < 0.4 ? 'High Risk' : 'Moderate',
+      environmental: envVal.toFixed(2),
+      environmentalLevel: envVal > 0.6 ? 'High' : 'Moderate',
+      healthcareAccess: healthAccessVal.toFixed(2),
+      healthcareAccessLevel: healthAccessVal > 0.6 ? 'Good' : 'Moderate',
       equityScore: Math.round((1 - avgRisk) * 100),
       equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
-      center: [parseFloat(patientData.value.lat) || 38.2917, parseFloat(patientData.value.long) || -76.5413],
+      center: [parseFloat(patientData.value?.lat) || 38.2917, parseFloat(patientData.value?.long) || -76.5413],
       bounds: [],
       factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
         ? mlPredictionResults.value.sdoh_barriers
