@@ -40,6 +40,11 @@ jobs:
           mkdir -p rag research_assis
           touch .env rag/.env research_assis/.env
 
+      - name: Expand EBS partition to full 30GB capacity
+        run: |
+          sudo growpart /dev/nvme0n1 1 || true
+          sudo resize2fs /dev/nvme0n1p1 || sudo resize2fs /dev/root || sudo xfs_growfs / || true
+
       - name: Clean disk space before build
         run: |
           echo "=== Disk space before cleanup ==="
