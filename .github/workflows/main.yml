@@ -44,6 +44,8 @@ jobs:
         run: |
           docker system prune -af --volumes || true
           docker builder prune -af || true
+          rm -rf ~/.cache/pip ~/.npm /tmp/* || true
+          sudo apt-get clean || true
 
       - name: Build and Start CareEquity Multi-Container Stack
         run: |
