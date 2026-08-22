@@ -39,8 +39,7 @@ services:
     environment:
       VITE_RAZORPAY_KEY_ID: rzp_test_TRtTOuWOsWyK15
     depends_on:
-      main-backend:
-        condition: service_healthy
+      - main-backend
     restart: unless-stopped
 
   ocr-backend:
