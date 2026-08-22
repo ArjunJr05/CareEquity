@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Network } from 'vis-network/standalone'
+import { KG_BACKEND_URL } from '../config'
 
-const API_BASE = 'http://localhost:8002'
+const API_BASE = KG_BACKEND_URL
 
 // State
 const counties = ref([])

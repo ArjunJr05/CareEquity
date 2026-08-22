@@ -129,3 +129,33 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  kg-backend:
+    build:
+      context: ./kg
+      dockerfile: Dockerfile
+    container_name: careequity-kg-backend
+    ports:
+      - "8004:8000"
+    env_file:
+      - ./kg/.env
+    environment:
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-8357afa1}
+      - AURA_INSTANCEID=${AURA_INSTANCEID:-8357afa1}
+      - AURA_INSTANCENAME=${AURA_INSTANCENAME:-Instance01}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
