@@ -2,11 +2,11 @@ name: CareEquity CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
-      - arjun
     paths-ignore:
       - 'README.md'
+  pull_request:
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -32,10 +32,17 @@ jobs:
   Continuous-Deployment:
     name: Continuous Deployment (EC2 Runner)
     needs: integration
+    if: github.ref == 'refs/heads/main'
     runs-on: self-hosted
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+
+      - name: Ensure .env files exist on EC2 deployment
+        run: |
+          touch .env || true
+          touch rag/.env || true
+          touch research_assis/.env || true
 
       - name: Clean disk space before build
         run: |
@@ -51,4 +58,5 @@ jobs:
 
       - name: Clean unused images
         run: |
-          docker image prune -f || true
+          docker image prune -f || true
+
