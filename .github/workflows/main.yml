@@ -22,9 +22,8 @@ jobs:
 
       - name: Ensure .env files exist for CI
         run: |
-          touch .env || true
-          touch rag/.env || true
-          touch research_assis/.env || true
+          mkdir -p rag research_assis
+          touch .env rag/.env research_assis/.env
 
       - name: Verify Docker Compose Configuration
         run: docker compose config
