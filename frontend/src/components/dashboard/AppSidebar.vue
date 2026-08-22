@@ -18,7 +18,7 @@ const nav = computed(() => {
     ]
   }
   return [
-    { name: 'Overview', icon: 'home', gif: '/assets/home.gif', to: '/' },
+    { name: 'Overview', icon: 'home', gif: '/assets/home.gif', to: '/overview' },
     { name: 'Equity Map', icon: 'map', gif: '/assets/map.gif', to: '/equity-map' },
     { name: 'SDOH Insights', icon: 'pulse', gif: '/assets/statistics.gif', to: '/sdoh-insights' },
     { name: 'Predictive Analytics', icon: 'trend', gif: '/assets/analysis.gif', to: '/predictive-analytics' },

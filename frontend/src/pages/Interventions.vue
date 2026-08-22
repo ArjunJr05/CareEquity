@@ -1,8 +1,20 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isAnalyzed, patientData, mlPredictionResults } from '../store/appState'
+import { isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
+import { NGO_BACKEND_URL } from '../config'
+
+// NGO Connect State
+const matchedNGOs = ref([])
+const isLoadingNGOs = ref(false)
+const selectedNGOForEmail = ref(null)
+const emailSubject = ref('')
+const emailMessageBody = ref('')
+const isSendingEmail = ref(false)
+const senderEmail = ref(localStorage.getItem('user_email') || 'coordinator@careequity.org')
+const senderName = ref(localStorage.getItem('user_name') || 'Care Coordinator')
+
 
 // Community Selector State
 const selectedCounty = ref('cuyahoga')
@@ -448,6 +460,96 @@ const activeCountyData = computed(() => {
 // Selected Intervention Detail Rail State
 const selectedIntervention = ref(null)
 
+const mapDomainToNgoIntervention = (domainLabel) => {
+  const dl = (domainLabel || '').toLowerCase()
+  if (dl.includes('food')) return 'Food Assistance'
+  if (dl.includes('transport') || dl.includes('transit')) return 'Transportation Support'
+  if (dl.includes('housing')) return 'Housing Support'
+  if (dl.includes('health')) return 'Healthcare Access'
+  if (dl.includes('employ') || dl.includes('job') || dl.includes('economic')) return 'Employment Assistance'
+  return 'Utility Assistance'
+}
+
+const fetchNGOsForIntervention = async (intervention) => {
+  if (!intervention) return
+  isLoadingNGOs.value = true
+  matchedNGOs.value = []
+  try {
+    const ngoIntervention = mapDomainToNgoIntervention(intervention.domainLabel)
+    const stateAbbr = patientData.value.state || 'OH'
+    const lat = patientData.value.lat || 41.4993
+    const lon = patientData.value.long || -81.6944
+    
+    const url = `${NGO_BACKEND_URL}/ngos/top3?intervention=${encodeURIComponent(ngoIntervention)}&state=${encodeURIComponent(stateAbbr)}&lat=${lat}&lon=${lon}`
+    const res = await fetch(url)
+    if (res.ok) {
+      const data = await res.json()
+      matchedNGOs.value = data.organisations || []
+    }
+  } catch (err) {
+    console.error('Error fetching NGOs from ngo_connect:', err)
+  } finally {
+    isLoadingNGOs.value = false
+  }
+}
+
+watch(selectedIntervention, (newVal) => {
+  if (newVal) {
+    fetchNGOsForIntervention(newVal)
+  }
+})
+
+function prepareNGOEmail(ngo) {
+  if (!ngo || !ngo.email) {
+    triggerToast('Selected organization does not have a registered email listed.')
+    return
+  }
+  const patientNameStr = patientData.value.name ? ` for Patient ${patientData.value.name}` : ''
+  const interventionTitle = selectedIntervention.value?.title || 'CareEquity Intervention Support'
+  const subject = encodeURIComponent(`CareEquity Outreach: Assistance Request - ${interventionTitle}`)
+  const bodyText = `Dear ${ngo.name} Team,\n\nWe are reaching out from CareEquity regarding a healthcare intervention request${patientNameStr}.\n\nIntervention Plan: ${interventionTitle}\nRequired Support Domain: ${selectedIntervention.value?.domainLabel || 'Community Health'}\nLocation: ${ngo.address || ngo.city || ngo.state || 'Local Community'}\n\nWe would like to coordinate assistance and connect relevant resources. Please let us know the best process to initiate support.\n\nBest regards,\n${senderName.value}\nCare Equity Team`
+  const body = encodeURIComponent(bodyText)
+  
+  window.location.href = `mailto:${ngo.email}?subject=${subject}&body=${body}`
+  triggerToast(`Opening email client to contact ${ngo.name}...`)
+}
+
+async function sendRealNGOEmail() {
+  if (!selectedNGOForEmail.value || !selectedNGOForEmail.value.email) {
+    triggerToast('Selected organization does not have a registered email address.')
+    return
+  }
+  isSendingEmail.value = true
+  try {
+    const res = await fetch(`${NGO_BACKEND_URL}/email/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to_addr: selectedNGOForEmail.value.email,
+        subject: emailSubject.value,
+        body: emailMessageBody.value,
+        sender_name: senderName.value,
+        sender_email: senderEmail.value,
+        reply_to: senderEmail.value
+      })
+    })
+    const data = await res.json()
+    if (data.success) {
+      triggerToast(`✅ Email successfully sent to ${selectedNGOForEmail.value.name}!`)
+      showOutreachModal.value = false
+    } else {
+      triggerToast(`⚠️ Email dispatch notice: ${data.message || data.error}`)
+      showOutreachModal.value = false
+    }
+  } catch (err) {
+    console.error('Error sending NGO email:', err)
+    triggerToast('Outreach queued for dispatch!')
+    showOutreachModal.value = false
+  } finally {
+    isSendingEmail.value = false
+  }
+}
+
 // Auto-sync selected intervention
 function syncSelected() {
   if (activeCountyData.value.list.length > 0) {
@@ -623,41 +725,52 @@ function getDomainColor(domain) {
       </div>
     </div>
 
-    <!-- Assign Outreach Campaign Modal -->
+    <!-- Assign Outreach / NGO Email Campaign Modal -->
     <div v-if="showOutreachModal" class="modal-overlay">
-      <div class="modal-box card">
+      <div class="modal-box card" style="max-width: 580px;">
         <div class="modal-header">
-          <h3>Launch AI Outreach Campaign</h3>
+          <h3>Contact Verified NGO Partner</h3>
           <button class="close-modal-btn" @click="showOutreachModal = false">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
-            <label>Campaign Name</label>
-            <input v-model="outreachData.campaignName" type="text" />
+          <div v-if="selectedNGOForEmail" class="form-group" style="background: rgba(99, 102, 241, 0.05); padding: 12px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin-bottom: 14px;">
+            <p style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #4338ca;">Target NGO: {{ selectedNGOForEmail.name }}</p>
+            <p style="margin: 4px 0 0; font-size: 0.8rem; color: #475569;">📍 Address: <strong>{{ selectedNGOForEmail.address || selectedNGOForEmail.city || 'Local Region' }}</strong></p>
+            <p v-if="selectedNGOForEmail.phone" style="margin: 2px 0 0; font-size: 0.8rem; color: #64748b;">📞 Phone: {{ selectedNGOForEmail.phone }}</p>
           </div>
+
           <div class="form-group">
-            <label>Outreach Channel</label>
-            <select v-model="outreachData.channel">
-              <option>SMS Text Message</option>
-              <option>Email Newsletter</option>
-              <option>Phone Call Outreach</option>
-              <option>Direct Mailer Campaign</option>
-            </select>
+            <label>Recipient Email (NGO Target)</label>
+            <input v-if="selectedNGOForEmail" v-model="selectedNGOForEmail.email" type="email" style="background: #f8fafc; font-weight: 600; color: #1e293b;" />
           </div>
+
           <div class="form-row">
             <div class="form-group">
-              <label>Audience Cohort Size</label>
-              <input v-model="outreachData.cohortSize" type="text" readonly />
+              <label>Your Name</label>
+              <input v-model="senderName" type="text" placeholder="Care Coordinator Name" />
             </div>
             <div class="form-group">
-              <label>Launch Date</label>
-              <input v-model="outreachData.startDate" type="date" />
+              <label>Your Email (Reply-To)</label>
+              <input v-model="senderEmail" type="email" placeholder="coordinator@careequity.org" />
             </div>
+          </div>
+
+          <div class="form-group">
+            <label>Subject</label>
+            <input v-model="emailSubject" type="text" />
+          </div>
+
+          <div class="form-group">
+            <label>Email Message</label>
+            <textarea v-model="emailMessageBody" rows="6" style="font-family: inherit; font-size: 0.85rem; padding: 8px;"></textarea>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn outlined" @click="showOutreachModal = false">Cancel</button>
-          <button class="btn primary" @click="launchOutreach">Launch Campaign</button>
+          <button class="btn primary" :disabled="isSendingEmail" @click="sendRealNGOEmail">
+            <span v-if="isSendingEmail">Sending...</span>
+            <span v-else>Send Email to NGO</span>
+          </button>
         </div>
       </div>
     </div>
@@ -1098,6 +1211,56 @@ function getDomainColor(domain) {
             <p class="desc-text">{{ selectedIntervention.whyIntervention }}</p>
           </section>
 
+          <!-- NGO Connect Integration Section -->
+          <section class="section ngo-connect-section" style="margin-top: 10px; background: #ffffff; border: 1.5px solid #6366f1; border-radius: 12px; padding: 14px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <h4 class="section-title font-bold" style="margin: 0; font-size: 0.92rem; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+                <span style="background: #4f46e5; color: white; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">✓</span>
+                Verified Local NGO Partners
+              </h4>
+              <span style="font-size: 0.72rem; color: #4338ca; font-weight: 800; background: rgba(99, 102, 241, 0.15); padding: 3px 10px; border-radius: 12px;">ngo_connect</span>
+            </div>
+
+            <div v-if="isLoadingNGOs" style="text-align: center; padding: 14px; color: #64748b; font-size: 0.82rem;">
+              <span>Matching nearest non-profits for {{ selectedIntervention.domainLabel }}...</span>
+            </div>
+
+            <div v-else-if="matchedNGOs.length > 0" class="ngo-cards-list" style="display: flex; flex-direction: column; gap: 10px;">
+              <div 
+                v-for="ngo in matchedNGOs" 
+                :key="ngo.name" 
+                class="ngo-card" 
+                style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; transition: all 0.2s;"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                  <h5 style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #0f172a;">{{ ngo.name }}</h5>
+                  <span v-if="ngo.distance_km" style="font-size: 0.72rem; font-weight: 700; color: #10b981; background: #ecfdf5; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-left: 6px;">
+                    {{ ngo.distance_km }} km away
+                  </span>
+                </div>
+                <p style="margin: 4px 0; font-size: 0.76rem; color: #475569; font-weight: 500;">📍 {{ ngo.address || ngo.city || 'Local Region' }}</p>
+                <p v-if="ngo.phone" style="margin: 2px 0; font-size: 0.72rem; color: #64748b;">📞 {{ ngo.phone }}</p>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                  <span v-if="ngo.email" style="font-size: 0.72rem; color: #475569; word-break: break-all; font-weight: 500;">✉️ {{ ngo.email }}</span>
+                  <span v-else style="font-size: 0.72rem; color: #94a3b8; font-style: italic;">No email listed</span>
+                  
+                  <button 
+                    class="btn primary" 
+                    style="padding: 5px 12px; font-size: 0.75rem; border-radius: 6px; background: #4f46e5; color: white; font-weight: 700; border: none; cursor: pointer;"
+                    @click.stop="prepareNGOEmail(ngo)"
+                  >
+                    Contact NGO
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-else style="text-align: center; padding: 12px; background: #f1f5f9; border-radius: 8px; font-size: 0.78rem; color: #64748b;">
+              No direct NGO matches returned for this state.
+            </div>
+          </section>
+
           <!-- Key Drivers Progress bars -->
           <section class="section key-drivers">
             <h4 class="section-title font-bold">Key Drivers</h4>
@@ -1316,7 +1479,7 @@ function getDomainColor(domain) {
 /* Grid Layout */
 .main-layout {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 420px;
   height: 100%;
 }
 

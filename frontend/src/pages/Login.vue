@@ -314,8 +314,14 @@ const handleSignUp = async () => {
     })
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}))
-      showToast(errData.detail || 'Email is already registered.', 'error')
+      let errorMsg = 'Email is already registered.'
+      try {
+        const errData = await response.json()
+        if (errData && errData.detail) {
+          errorMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail)
+        }
+      } catch (e) {}
+      showToast(errorMsg, 'error')
     } else {
       showToast('Verification OTP sent to ' + signupEmail.value, 'success')
       // Switch to OTP page

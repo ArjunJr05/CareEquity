@@ -1237,9 +1237,9 @@ const handleAnalyze = async () => {
             
 
             <div class="card upload-card" :class="{ dragover: isDragOver }" @dragover.prevent="onDragOver" @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
-              <div v-if="isUploadingFile" class="upload-loading-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.9); z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border-radius: inherit;">
-                <div class="ocr-spinner" style="width: 32px; height: 32px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spinner-rotate 0.8s linear infinite;"></div>
-                <p style="font-weight: 600; color: #4f46e5; margin: 0; font-size: 0.9rem;">Extracting patient data with OCR AI...</p>
+              <div v-if="isUploadingFile" class="upload-loading-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(4px); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; border-radius: inherit;">
+                <div class="ocr-spinner" style="width: 44px; height: 44px; border: 4px solid #e0e7ff; border-top-color: #4f46e5; border-radius: 50%; animation: spinner-rotate 0.75s linear infinite; box-shadow: 0 0 12px rgba(79, 70, 229, 0.2);"></div>
+                <p style="font-weight: 700; color: #4338ca; margin: 0; font-size: 0.92rem; letter-spacing: 0.2px;">Extracting patient data with OCR AI...</p>
               </div>
               <input type="file" ref="fileInput" class="hidden-input" accept=".pdf,.doc,.docx" @change="onFileChange" />
               
