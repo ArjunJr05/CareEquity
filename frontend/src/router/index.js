@@ -96,12 +96,6 @@ router.beforeEach((to, from, next) => {
   } else {
     if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans') {
       next({ name: 'login' })
-    } else if (to.name !== 'setup' && to.name !== 'login' && to.name !== 'plan' && !isAnalyzed.value) {
-      if (to.name === 'setup') {
-        next()
-      } else {
-        next({ name: 'setup' })
-      }
     } else {
       next()
     }
