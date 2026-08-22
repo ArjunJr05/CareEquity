@@ -27,24 +27,8 @@ def get_db():
         yield None
         return
     
-    db = None
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        # Test connection validity
-        from sqlalchemy import text
-        db.execute(text("SELECT 1"))
         yield db
-    except Exception as err:
-        print(f"Database session error: {err}")
-        if db is not None:
-            try:
-                db.close()
-            except Exception:
-                pass
-        yield None
     finally:
-        if db is not None:
-            try:
-                db.close()
-            except Exception:
-                pass
+        db.close()

@@ -33,11 +33,13 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
 
     # 2. Check if email already exists in DB
     if db is not None:
-        existing_user = db.query(User).filter(User.email == user_in.email).first()
+        from sqlalchemy import func
+        clean_email = user_in.email.strip().lower()
+        existing_user = db.query(User).filter(func.lower(User.email) == clean_email).first()
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email is already registered."
+                detail="Email is already registered. Please sign in instead."
             )
 
     # 3. Generate 6-digit OTP code

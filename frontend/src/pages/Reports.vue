@@ -2,9 +2,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload, agentReport, isAgentLoading, userPlan } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload, agentReport, isAgentLoading, setAgentReport, userPlan } from '../store/appState'
 
-import { MAIN_BACKEND_URL } from '../config'
+import { MAIN_BACKEND_URL, AGENT_BACKEND_URL } from '../config'
 
 
 const router = useRouter()
@@ -388,10 +388,55 @@ async function fetchLocalResources() {
   }
 }
 
+async function runAgentAnalysis() {
+  try {
+    isAgentLoading.value = true
+    const p = patientData.value || {}
+    const chronicList = []
+    if (p.diabetes === 'Yes') chronicList.push('Type 2 Diabetes')
+    if (p.hypertension === 'Yes') chronicList.push('Essential Hypertension')
+    if (p.heart_disease === 'Yes') chronicList.push('Congestive Heart Failure')
+    if (p.asthma === 'Yes') chronicList.push('Asthma')
+
+    const agentPayload = {
+      case_id: p.name ? `CASE_${p.name.replace(/\s+/g, '_').toUpperCase()}` : 'PATIENT_001',
+      age: parseInt(p.age) || 45,
+      geography: p.county ? `${p.county}, ${p.state || 'US'}` : 'Bronx County, NY',
+      risk_score: 75.0,
+      risk_level: 'high',
+      chronic_conditions: chronicList.length > 0 ? chronicList : ['Type 2 Diabetes'],
+      transportation: true,
+      food_access: true,
+      economic_stability: true,
+      housing: false,
+      social_isolation: false
+    }
+
+    const res = await fetch(`${AGENT_BACKEND_URL}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(agentPayload)
+    })
+
+    if (res.ok) {
+      const reportData = await res.json()
+      setAgentReport(reportData)
+      triggerToast('Multi-Agent Research Synthesis generated!')
+    }
+  } catch (agentErr) {
+    console.warn('Agent Backend endpoint failed from Reports.vue:', agentErr)
+  } finally {
+    isAgentLoading.value = false
+  }
+}
+
 onMounted(() => {
-  if (isAnalyzed.value) {
+  if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
     fetchLocalResources()
     activeGeography.value = 'Active Patient'
+    if (!agentReport.value) {
+      runAgentAnalysis()
+    }
   }
 })
 
@@ -399,6 +444,9 @@ watch(isAnalyzed, (newVal) => {
   if (newVal) {
     fetchLocalResources()
     activeGeography.value = 'Active Patient'
+    if (!agentReport.value) {
+      runAgentAnalysis()
+    }
   }
 })
 
@@ -1188,6 +1236,13 @@ function exportCSV() {
                 </h3>
                 <p style="margin: 0; font-size: 0.82rem; color: #64748b;">Multi-agent SDOH evaluation, live web surveillance, targeted interventions, and local safety net services.</p>
               </div>
+              <button 
+                @click="runAgentAnalysis" 
+                :disabled="isAgentLoading"
+                style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%); color: #ffffff; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);"
+              >
+                <span>{{ isAgentLoading ? 'Synthesizing...' : '⚡ Run Agent Synthesis' }}</span>
+              </button>
             </div>
 
             <!-- Tab Navigation Strip (matching image 1) -->
@@ -1242,8 +1297,15 @@ function exportCSV() {
                 ></div>
                 <div v-else style="padding: 24px; text-align: center; color: #64748b;">
                   <p style="font-size: 0.9rem; font-weight: 600;">📋 Comprehensive Clinical Care Plan</p>
-                  <p style="font-size: 0.82rem;">Run analysis in <strong>Data Setup</strong> to populate live multi-agent care plan synthesis.</p>
-                  <div style="background: #f1f5f9; padding: 14px; border-radius: 8px; text-align: left; margin-top: 12px; font-size: 0.85rem;">
+                  <p style="font-size: 0.82rem; margin-bottom: 12px;">Run analysis to populate live multi-agent care plan synthesis.</p>
+                  <button 
+                    @click="runAgentAnalysis" 
+                    :disabled="isAgentLoading"
+                    style="background: #0f766e; color: #fff; border: none; padding: 8px 18px; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px;"
+                  >
+                    ⚡ {{ isAgentLoading ? 'Synthesizing Live LLM Agent Report...' : 'Run Multi-Agent Research Synthesis' }}
+                  </button>
+                  <div style="background: #f1f5f9; padding: 14px; border-radius: 8px; text-align: left; margin-top: 4px; font-size: 0.85rem;">
                     <strong>Baseline Guidance:</strong> Initiate multidisciplinary SDOH screening for chronic disease management, food security support, and medical transport coordination.
                   </div>
                 </div>
