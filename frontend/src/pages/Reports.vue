@@ -2,13 +2,18 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload, userPlan } from '../store/appState'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, ocrExtractedJson, mlInputPayload, agentReport, isAgentLoading, userPlan } from '../store/appState'
 
 import { MAIN_BACKEND_URL } from '../config'
 
+
 const router = useRouter()
 
+// Agent Tab state
+const activeAgentTab = ref('care_plan')
+
 // Active configuration state
+
 const activeGeography = ref('Cuyahoga County, OH')
 const activePopulation = ref('All Populations')
 const activeDateRange = ref('May 1 – May 31, 2025')
@@ -738,6 +743,24 @@ function downloadPatientReport() {
         ${barriersSectionHtml}
         ${resourcesSectionHtml}
 
+        ${agentReport.value ? `
+        <div class="section-title">Multi-Agent Research Assistant Care Plan & Live Surveillance</div>
+        <div class="card" style="margin-bottom: 20px;">
+          <h4 style="margin: 0 0 10px 0; color: #0d9488;">Evidence-Based Interventions (${agentReport.value.interventions?.length || 0})</h4>
+          ${(agentReport.value.interventions || []).map((item, idx) => `
+            <div style="margin-bottom: 12px; padding: 10px; border-left: 3px solid #0d9488; background: #ffffff; border-radius: 4px;">
+              <strong>${idx + 1}. ${item.name}</strong> (${item.target_sdoh})<br/>
+              <span style="font-size: 13px; color: #475569;">${item.description}</span><br/>
+              <span style="font-size: 12px; color: #0f766e;">• <strong>Action:</strong> ${item.how_to_access} | <strong>Outcome:</strong> ${item.expected_outcome}</span>
+            </div>
+          `).join('')}
+          ${agentReport.value.live_surveillance?.active_disease_alerts?.length ? `
+            <h4 style="margin: 14px 0 6px 0; color: #d97706;">Live Regional Health Alerts</h4>
+            ${agentReport.value.live_surveillance.active_disease_alerts.map(a => `<div style="background:#fffbeb; color:#92400e; padding:6px 10px; border-radius:4px; font-size:12px; margin-bottom:4px;">⚠️ ${a}</div>`).join('')}
+          ` : ''}
+        </div>
+        ` : ''}
+
         <div class="section-title">Raw ML Input JSON Payload Record</div>
         <div style="background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; color: #38bdf8; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all;">
 ${JSON.stringify(mlInputPayload.value || ocrExtractedJson.value || {
@@ -755,6 +778,7 @@ ${JSON.stringify(mlInputPayload.value || ocrExtractedJson.value || {
   "patient_data": p
 }, null, 2)}
         </div>
+
 
         <div class="footer">
           <p>Confidential Medical Record. This report was compiled using CareEquity predictive models and local geolocation scraping endpoints.</p>
@@ -1170,6 +1194,232 @@ function exportCSV() {
 
           </div>
 
+          <!-- Multi-Agent Research Assistant Intelligence Section (Tabs & Content) -->
+          <div class="agent-intelligence-wrapper card" style="margin-top: 24px; padding: 20px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
+            
+            <!-- Agent Header Strip -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #f1f5f9;">
+              <div>
+                <h3 style="margin: 0 0 4px 0; font-size: 1.15rem; font-weight: 800; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                  <span>🤖 Multi-Agent Research Assistant Synthesis</span>
+                  <span v-if="isAgentLoading" style="font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 12px; font-weight: 600;">⚡ Synthesizing Live LLM Intelligence...</span>
+                  <span v-else-if="agentReport" style="font-size: 0.75rem; background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-weight: 600;">✓ Live Synthesis Ready</span>
+                </h3>
+                <p style="margin: 0; font-size: 0.82rem; color: #64748b;">Multi-agent SDOH evaluation, live web surveillance, targeted interventions, and local safety net services.</p>
+              </div>
+            </div>
+
+            <!-- Tab Navigation Strip (matching image 1) -->
+            <div class="agent-tabs-nav">
+              <button 
+                class="agent-tab-btn" 
+                :class="{ active: activeAgentTab === 'care_plan' }"
+                @click="activeAgentTab = 'care_plan'"
+              >
+                📋 Clinical Care Plan
+              </button>
+              <button 
+                class="agent-tab-btn" 
+                :class="{ active: activeAgentTab === 'interventions' }"
+                @click="activeAgentTab = 'interventions'"
+              >
+                💡 Targeted Interventions
+              </button>
+              <button 
+                class="agent-tab-btn" 
+                :class="{ active: activeAgentTab === 'live_alerts' }"
+                @click="activeAgentTab = 'live_alerts'"
+              >
+                🌐 Live Disease Alerts
+              </button>
+              <button 
+                class="agent-tab-btn" 
+                :class="{ active: activeAgentTab === 'safety_net' }"
+                @click="activeAgentTab = 'safety_net'"
+              >
+                📍 Local Safety Net
+              </button>
+              <button 
+                class="agent-tab-btn" 
+                :class="{ active: activeAgentTab === 'demographics' }"
+                @click="activeAgentTab = 'demographics'"
+              >
+                🗺️ Area Demographics
+              </button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="agent-tab-content" style="margin-top: 18px;">
+              
+              <!-- Tab 1: Clinical Care Plan -->
+              <div v-if="activeAgentTab === 'care_plan'">
+                <div v-if="agentReport && agentReport.comprehensive_report" class="markdown-body" style="font-size: 0.9rem; line-height: 1.6; color: #334155; white-space: pre-wrap; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                  {{ agentReport.comprehensive_report }}
+                </div>
+                <div v-else style="padding: 24px; text-align: center; color: #64748b;">
+                  <p style="font-size: 0.9rem; font-weight: 600;">📋 Comprehensive Clinical Care Plan</p>
+                  <p style="font-size: 0.82rem;">Run analysis in <strong>Data Setup</strong> to populate live multi-agent care plan synthesis.</p>
+                  <div style="background: #f1f5f9; padding: 14px; border-radius: 8px; text-align: left; margin-top: 12px; font-size: 0.85rem;">
+                    <strong>Baseline Guidance:</strong> Initiate multidisciplinary SDOH screening for chronic disease management, food security support, and medical transport coordination.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab 2: Targeted Interventions -->
+              <div v-if="activeAgentTab === 'interventions'">
+                <div v-if="agentReport && agentReport.interventions && agentReport.interventions.length > 0">
+                  <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 700; color: #0f172a;">Evidence-Based Interventions ({{ agentReport.interventions.length }})</h4>
+                  <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+                    <div v-for="(item, i) in agentReport.interventions" :key="i" style="background: #f8fafc; border-left: 4px solid #0d9488; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <strong style="color: #0f766e; font-size: 0.95rem;">{{ i + 1 }}. {{ item.name }}</strong>
+                        <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">{{ item.target_sdoh }}</span>
+                      </div>
+                      <p style="margin: 0 0 8px 0; font-size: 0.85rem; color: #334155;">{{ item.description }}</p>
+                      <div style="font-size: 0.8rem; color: #475569; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div><strong>Action:</strong> {{ item.how_to_access }}</div>
+                        <div><strong>Outcome:</strong> {{ item.expected_outcome }}</div>
+                        <div><strong>Contact:</strong> {{ item.contact_info }}</div>
+                        <div><strong>Timeline:</strong> {{ item.timeline }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else style="padding: 24px; text-align: center; color: #64748b;">
+                  <p style="font-size: 0.9rem; font-weight: 600;">💡 Targeted Evidence-Based Interventions</p>
+                  <p style="font-size: 0.82rem;">No custom agent interventions loaded yet. Prescribing default evidence-based protocol.</p>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; margin-top: 12px;">
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border-left: 3px solid #3b82f6; font-size: 0.82rem;">
+                      <strong>1. Produce Prescription & Food Pantry Referral</strong><br/>
+                      Provides fresh fruits & vegetables vouchers to low-income patients with chronic conditions.
+                    </div>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border-left: 3px solid #10b981; font-size: 0.82rem;">
+                      <strong>2. Non-Emergency Medical Transportation (NEMT)</strong><br/>
+                      Rideshare vouchers & shuttle passes for routine clinic & pharmacy visits.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab 3: Live Disease Alerts -->
+              <div v-if="activeAgentTab === 'live_alerts'">
+                <div v-if="agentReport && agentReport.live_surveillance">
+                  <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85rem; color: #1e40af;">
+                    <strong>Surveillance Location:</strong> {{ agentReport.live_surveillance.location || 'Regional Monitor' }}<br/>
+                    <span>{{ agentReport.live_surveillance.surveillance_summary }}</span>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                      <h5 style="margin: 0 0 8px 0; color: #991b1b; font-size: 0.85rem; font-weight: 700;">⚠️ Active Regional Disease & Health Alerts</h5>
+                      <div v-if="agentReport.live_surveillance.active_disease_alerts && agentReport.live_surveillance.active_disease_alerts.length > 0">
+                        <div v-for="(alert, aIdx) in agentReport.live_surveillance.active_disease_alerts" :key="aIdx" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px; border: 1px solid #fecaca;">
+                          ⚠️ {{ alert }}
+                        </div>
+                      </div>
+                      <div v-else style="font-size: 0.82rem; color: #64748b;">No active epidemic warnings reported.</div>
+
+                      <h5 style="margin: 12px 0 8px 0; color: #0f172a; font-size: 0.85rem; font-weight: 700;">📈 Public Health Trends</h5>
+                      <ul style="margin: 0; padding-left: 18px; font-size: 0.82rem; color: #334155;">
+                        <li v-for="(tr, tIdx) in (agentReport.live_surveillance.public_health_trends || ['Seasonal flu surveillance active', 'Community heat vulnerability monitoring'])" :key="tIdx">
+                          {{ tr }}
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h5 style="margin: 0 0 8px 0; color: #0f172a; font-size: 0.85rem; font-weight: 700;">📰 Live Web News & Advisories</h5>
+                      <div v-if="agentReport.live_surveillance.recent_news_snippets && agentReport.live_surveillance.recent_news_snippets.length > 0">
+                        <div v-for="(news, nIdx) in agentReport.live_surveillance.recent_news_snippets.slice(0, 3)" :key="nIdx" style="margin-bottom: 8px; padding: 8px; background: #f8fafc; border-radius: 6px; font-size: 0.8rem;">
+                          <a :href="news.url || '#'" target="_blank" style="font-weight: 700; color: #2563eb; text-decoration: underline;">{{ news.title || 'Health Advisory' }}</a>
+                          <p style="margin: 2px 0 0 0; color: #475569;">{{ news.snippet }}</p>
+                        </div>
+                      </div>
+                      <div v-else style="font-size: 0.82rem; color: #64748b;">Active live web crawler monitoring local health department portals.</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else style="padding: 24px; text-align: center; color: #64748b;">
+                  <p style="font-size: 0.9rem; font-weight: 600;">🌐 Live Regional Disease Surveillance</p>
+                  <p style="font-size: 0.82rem;">Real-time web monitoring for regional outbreaks, heat waves, and public health advisories.</p>
+                </div>
+              </div>
+
+              <!-- Tab 4: Local Safety Net -->
+              <div v-if="activeAgentTab === 'safety_net'">
+                <div v-if="agentReport && agentReport.local_resources">
+                  <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 700; color: #0f172a;">Local Safety Net Assets — {{ agentReport.local_resources.location }}</h4>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                      <h5 style="margin: 0 0 6px 0; font-size: 0.85rem; color: #0369a1;">🏥 Clinics & Healthcare Providers</h5>
+                      <ul style="margin: 0 0 12px 0; padding-left: 18px; font-size: 0.82rem; color: #334155;">
+                        <li v-for="(hc, hcIdx) in (agentReport.local_resources.healthcare_providers || [])" :key="hcIdx"><strong>{{ hc }}</strong></li>
+                      </ul>
+
+                      <h5 style="margin: 0 0 6px 0; font-size: 0.85rem; color: #0369a1;">🚌 Transportation Assistance</h5>
+                      <ul style="margin: 0; padding-left: 18px; font-size: 0.82rem; color: #334155;">
+                        <li v-for="(tr, trIdx) in (agentReport.local_resources.transportation_programs || [])" :key="trIdx">{{ tr }}</li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h5 style="margin: 0 0 6px 0; font-size: 0.85rem; color: #0369a1;">🍎 Food & Nutrition Services</h5>
+                      <ul style="margin: 0 0 12px 0; padding-left: 18px; font-size: 0.82rem; color: #334155;">
+                        <li v-for="(fd, fdIdx) in (agentReport.local_resources.food_nutrition_services || [])" :key="fdIdx">{{ fd }}</li>
+                      </ul>
+
+                      <h5 style="margin: 0 0 6px 0; font-size: 0.85rem; color: #991b1b;">🚨 24/7 Crisis Helplines</h5>
+                      <div style="font-size: 0.82rem; color: #334155;">
+                        <div v-for="(val, key) in (agentReport.local_resources.emergency_contacts || {})" :key="key">
+                          <strong>{{ key }}:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{{ val }}</code>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else style="padding: 24px; text-align: center; color: #64748b;">
+                  <p style="font-size: 0.9rem; font-weight: 600;">📍 Local Safety Net Services</p>
+                  <p style="font-size: 0.82rem;">Locates nearby community clinics, food banks, transit vouchers, and crisis support lines.</p>
+                </div>
+              </div>
+
+              <!-- Tab 5: Area Demographics -->
+              <div v-if="activeAgentTab === 'demographics'">
+                <div v-if="agentReport && agentReport.geographic_analysis">
+                  <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 700; color: #0f172a;">Regional Demographics — {{ agentReport.geographic_analysis.location }}</h4>
+                  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px;">
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; text-align: center;">
+                      <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Median Age</span>
+                      <div style="font-size: 1.1rem; font-weight: 800; color: #0f172a;">{{ agentReport.geographic_analysis.demographics?.median_age || 36 }} yrs</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; text-align: center;">
+                      <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Poverty Rate</span>
+                      <div style="font-size: 1.1rem; font-weight: 800; color: #eab308;">{{ agentReport.geographic_analysis.demographics?.poverty_rate || 18 }}%</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; text-align: center;">
+                      <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Diabetes Rate</span>
+                      <div style="font-size: 1.1rem; font-weight: 800; color: #ef4444;">{{ agentReport.geographic_analysis.health_statistics?.diabetes_rate || 12 }}%</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; text-align: center;">
+                      <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Hypertension Rate</span>
+                      <div style="font-size: 1.1rem; font-weight: 800; color: #3b82f6;">{{ agentReport.geographic_analysis.health_statistics?.hypertension_rate || 35 }}%</div>
+                    </div>
+                  </div>
+                  <div style="font-size: 0.85rem; color: #334155; line-height: 1.5; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    <strong>Area Profile:</strong> {{ agentReport.geographic_analysis.area_health_profile || 'Urban environment profile with elevated socioeconomic vulnerability.' }}<br/><br/>
+                    <strong>Environmental Factors:</strong> {{ agentReport.geographic_analysis.environmental_factors || 'Air quality index moderate, transit corridor proximity.' }}
+                  </div>
+                </div>
+                <div v-else style="padding: 24px; text-align: center; color: #64748b;">
+                  <p style="font-size: 0.9rem; font-weight: 600;">🗺️ Regional Demographics & Environmental Drivers</p>
+                  <p style="font-size: 0.82rem;">Displays area-specific SVI metrics, poverty rates, and clinical disease prevalence.</p>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
           <div class="data-refreshed-bar font-semibold">
             <span class="left-info"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Report generated on May 31, 2025 &bull; 10:24 AM</span>
             <span class="secured"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Data privacy &amp; security protected</span>
@@ -1188,6 +1438,37 @@ function exportCSV() {
 </template>
 
 <style scoped>
+/* Agent Tabs Styling */
+.agent-tabs-nav {
+  display: flex;
+  gap: 16px;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+
+.agent-tab-btn {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.agent-tab-btn:hover {
+  color: #0f172a;
+}
+
+.agent-tab-btn.active {
+  color: #ef4444;
+  border-bottom-color: #ef4444;
+}
+
 .reports-page {
   background: #f8fafc;
   height: 100%;
@@ -1196,6 +1477,7 @@ function exportCSV() {
   overflow: hidden;
   position: relative;
 }
+
 
 /* Toast popup notification */
 .toast-popup {

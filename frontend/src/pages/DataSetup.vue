@@ -2,8 +2,9 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { setAnalyzed, setPatientData, setLocationRecords, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, setMlInputPayload, currentUserName, logoutUser, userPlan, syncUserSubscription } from '../store/appState'
-import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL } from '../config'
+import { setAnalyzed, setPatientData, setLocationRecords, isLoggedIn, setLoggedIn, setShowLoginScreen, setMlPredictionResults, setPredictionModelResults, setOcrExtractedJson, setMlInputPayload, setAgentReport, isAgentLoading, currentUserName, logoutUser, userPlan, syncUserSubscription } from '../store/appState'
+import { MAIN_BACKEND_URL, SYSTEM_BACKEND_URL, PREDICTION_BACKEND_URL, OCR_BACKEND_URL, AGENT_BACKEND_URL } from '../config'
+
 import { US_STATES, US_COUNTIES_BY_STATE } from '../data/usData.js'
 
 const router = useRouter()
@@ -830,6 +831,50 @@ const handleAnalyze = async () => {
       })
     }
   })()
+
+  // Trigger Research Assistant 4-Agent Pipeline backend call
+  const agentBackendPromise = (async () => {
+    try {
+      isAgentLoading.value = true
+      const primaryLoc = form.value.locations[0] || { county: 'Bronx County', state: 'NY' }
+      const chronicList = []
+      if (form.value.diabetes === 'Yes') chronicList.push('Type 2 Diabetes')
+      if (form.value.hypertension === 'Yes') chronicList.push('Essential Hypertension')
+      if (form.value.heart_disease === 'Yes') chronicList.push('Congestive Heart Failure')
+      if (form.value.asthma === 'Yes') chronicList.push('Asthma')
+
+      const agentPayload = {
+        case_id: form.value.name ? `CASE_${form.value.name.replace(/\s+/g, '_').toUpperCase()}` : 'PATIENT_001',
+        age: parseInt(form.value.age) || 45,
+        geography: `${primaryLoc.county}, ${primaryLoc.state}`,
+        risk_score: 75.0,
+        risk_level: 'high',
+        chronic_conditions: chronicList.length > 0 ? chronicList : ['Type 2 Diabetes'],
+        transportation: true,
+        food_access: true,
+        economic_stability: true,
+        housing: false,
+        social_isolation: false
+      }
+
+      const res = await fetch(`${AGENT_BACKEND_URL}/api/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agentPayload)
+      })
+
+      if (res.ok) {
+        const reportData = await res.json()
+        setAgentReport(reportData)
+        console.log('✓ Received 4-Agent Research Assistant synthesis report:', reportData)
+      }
+    } catch (agentErr) {
+      console.warn('Agent Backend endpoint failed:', agentErr)
+    } finally {
+      isAgentLoading.value = false
+    }
+  })()
+
 
   // Trigger Prediction Model Risk Lookup
   const predictionModelPromise = (async () => {
