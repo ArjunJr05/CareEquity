@@ -41,8 +41,29 @@ jobs:
 
       - name: Ensure .env files exist on EC2 deployment
         run: |
-          mkdir -p rag research_assis
-          touch .env rag/.env research_assis/.env
+          mkdir -p rag research_assis kg backend
+          
+          # Root .env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > .env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> .env
+          echo "NEO4J_URI=${{ secrets.NEO4J_URI }}" >> .env
+          echo "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" >> .env
+          echo "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" >> .env
+          echo "RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" >> .env
+          echo "RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}" >> .env
+          
+          # backend/.env
+          echo "RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" > backend/.env
+          echo "RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}" >> backend/.env
+          echo "DATABASE_URL=postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb" >> backend/.env
+
+          # rag/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > rag/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> rag/.env
+
+          # research_assis/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > research_assis/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> research_assis/.env
 
       - name: Expand EBS partition to full 30GB capacity
         run: |
