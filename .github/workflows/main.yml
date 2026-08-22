@@ -44,11 +44,10 @@ jobs:
         run: |
           echo "=== Disk space before cleanup ==="
           df -h
-          docker container prune -f || true
-          docker image prune -af || true
-          docker volume prune -f || true
+          docker system prune -af --volumes || true
           docker builder prune -af || true
-          sudo rm -rf /tmp/* /var/tmp/* ~/.cache/pip ~/.npm || true
+          sudo rm -rf /tmp/* /var/tmp/* ~/.cache/pip ~/.npm ~/.gradle || true
+          sudo apt-get autoremove -y || true
           sudo apt-get clean || true
           echo "=== Disk space after cleanup ==="
           df -h
