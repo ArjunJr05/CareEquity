@@ -146,10 +146,8 @@ services:
     container_name: careequity-agent-backend
     ports:
       - "8003:8000"
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    env_file:
+      - ./research_assis/.env
     restart: unless-stopped
     healthcheck:
       test:
@@ -171,6 +169,8 @@ services:
     container_name: careequity-agent-frontend
     ports:
       - "8503:8503"
+    env_file:
+      - ./research_assis/.env
     environment:
       - BACKEND_URL=http://agent-backend:8000
     depends_on:
