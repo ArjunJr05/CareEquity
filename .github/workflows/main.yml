@@ -1,0 +1,48 @@
+name: CareEquity CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - arjun
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  integration:
+    name: Continuous Integration & Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Verify Docker Compose Configuration
+        run: docker compose config
+
+  Continuous-Deployment:
+    name: Continuous Deployment (EC2 Runner)
+    needs: integration
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Clean disk space before build
+        run: |
+          docker system prune -af --volumes || true
+
+      - name: Build and Start CareEquity Multi-Container Stack
+        run: |
+          docker compose up -d --build --remove-orphans
+
+      - name: Verify Running Containers
+        run: |
+          docker compose ps
+
+      - name: Clean unused images
+        run: |
+          docker image prune -f || true
