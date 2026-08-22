@@ -88,21 +88,20 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   if (isLoggedIn.value && isAdmin.value) {
-    // Admin can access /admin, /admin/users, /admin/plans, or login/logout
     if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans' || to.name === 'login') {
       next()
     } else {
       next({ name: 'admin' })
     }
   } else {
-    // Normal user / guest flow
     if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans') {
       next({ name: 'login' })
     } else if (to.name !== 'setup' && to.name !== 'login' && to.name !== 'plan' && !isAnalyzed.value) {
-      next({ name: 'setup' })
-    } else if (to.name === 'setup' && isAnalyzed.value) {
-      isAnalyzed.value = false
-      next()
+      if (to.name === 'setup') {
+        next()
+      } else {
+        next({ name: 'setup' })
+      }
     } else {
       next()
     }
