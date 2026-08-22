@@ -29,19 +29,6 @@ services:
       retries: 5
       start_period: 20s
 
-  main-frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: careequity-main-frontend
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
-    depends_on:
-      - main-backend
-    restart: unless-stopped
-
   ocr-backend:
     build:
       context: ./ocr

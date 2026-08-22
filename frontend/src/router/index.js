@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import Overview from '../pages/Overview.vue'
 import EquityMap from '../pages/EquityMap.vue'
 import SDOHInsights from '../pages/SDOHInsights.vue'
@@ -15,7 +15,7 @@ import Plan from '../pages/Plan.vue'
 import { isAnalyzed, isLoggedIn, isAdmin } from '../store/appState'
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/setup',
