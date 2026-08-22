@@ -44,7 +44,8 @@ jobs:
 
       - name: Clean disk space before build
         run: |
-          docker system prune -f || true
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
 
       - name: Build and Start CareEquity Multi-Container Stack
         run: |
