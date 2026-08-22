@@ -2,11 +2,10 @@ name: CareEquity CI/CD Pipeline
 
 on:
   push:
-    paths-ignore:
-      - 'README.md'
-  pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'README.md'
 
 permissions:
   id-token: write
@@ -31,7 +30,6 @@ jobs:
   Continuous-Deployment:
     name: Continuous Deployment (EC2 Runner)
     needs: integration
-    if: github.ref == 'refs/heads/main'
     runs-on: self-hosted
     steps:
       - name: Checkout Code
@@ -58,4 +56,4 @@ jobs:
       - name: Clean unused images
         run: |
           docker image prune -f || true
-
+
