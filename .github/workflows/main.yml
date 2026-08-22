@@ -41,8 +41,22 @@ jobs:
 
       - name: Ensure .env files exist on EC2 deployment
         run: |
-          mkdir -p rag research_assis
-          touch .env rag/.env research_assis/.env
+          mkdir -p rag research_assis kg backend
+          
+          # Root .env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > .env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> .env
+          echo "NEO4J_URI=${{ secrets.NEO4J_URI }}" >> .env
+          echo "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" >> .env
+          echo "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" >> .env
+          
+          # rag/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > rag/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> rag/.env
+
+          # research_assis/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > research_assis/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> research_assis/.env
 
       - name: Expand EBS partition to full 30GB capacity
         run: |
