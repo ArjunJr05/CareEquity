@@ -18,38 +18,16 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     {
-      path: '/setup',
+      path: '/',
       name: 'setup',
       component: DataSetup,
     },
     {
-      path: '/login',
-      name: 'login',
-      component: Login,
+      path: '/setup',
+      redirect: '/',
     },
     {
-      path: '/admin',
-      name: 'admin',
-      component: Admin,
-    },
-    {
-      path: '/admin/users',
-      name: 'admin-users',
-      component: AdminUsers,
-    },
-    {
-      path: '/admin/plans',
-      name: 'admin-plans',
-      component: AdminPlans,
-    },
-    {
-      path: '/plan',
-      alias: '/plans',
-      name: 'plan',
-      component: Plan,
-    },
-    {
-      path: '/',
+      path: '/overview',
       name: 'overview',
       component: Overview,
     },
@@ -77,6 +55,32 @@ const router = createRouter({
       path: '/interventions',
       name: 'interventions',
       component: Interventions,
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: Login,
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: Admin,
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: AdminUsers,
+    },
+    {
+      path: '/admin/plans',
+      name: 'admin-plans',
+      component: AdminPlans,
+    },
+    {
+      path: '/plan',
+      alias: '/plans',
+      name: 'plan',
+      component: Plan,
     },
     {
       path: '/reports',
