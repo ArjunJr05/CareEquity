@@ -262,6 +262,41 @@ const errors = ref({
   weight_kg: false,
 })
 
+// Input sanitizers (prevent numbers in name, prevent negatives/decimals in age)
+const onNameInput = (e) => {
+  const cleaned = e.target.value.replace(/[0-9]/g, '')
+  form.value.name = cleaned
+  e.target.value = cleaned
+  if (errors.value.name) errors.value.name = !cleaned.trim()
+}
+
+const onAgeInput = (e) => {
+  let cleaned = e.target.value.replace(/\D/g, '')
+  if (cleaned.length > 1 && cleaned.startsWith('0')) {
+    cleaned = cleaned.replace(/^0+/, '')
+  }
+  if (parseInt(cleaned) > 125) {
+    cleaned = '125'
+  }
+  form.value.age = cleaned
+  e.target.value = cleaned
+  if (errors.value.age) errors.value.age = !cleaned || parseInt(cleaned) <= 0
+}
+
+const onHeightInput = (e) => {
+  let cleaned = e.target.value.replace(/[^0-9.]/g, '')
+  form.value.height_cm = cleaned
+  e.target.value = cleaned
+  if (errors.value.height_cm) errors.value.height_cm = !cleaned || parseFloat(cleaned) <= 0
+}
+
+const onWeightInput = (e) => {
+  let cleaned = e.target.value.replace(/[^0-9.]/g, '')
+  form.value.weight_kg = cleaned
+  e.target.value = cleaned
+  if (errors.value.weight_kg) errors.value.weight_kg = !cleaned || parseFloat(cleaned) <= 0
+}
+
 // Loading/Analysis states
 const isAnalyzing = ref(false)
 const isUploadingFile = ref(false)
@@ -544,13 +579,14 @@ const showUploadModal = ref(false)
 
 const openUploadModal = () => {
   // Validate
-  errors.value.name = !form.value.name
-  errors.value.age = !form.value.age
+  const ageVal = parseInt(form.value.age)
+  errors.value.name = !form.value.name || !form.value.name.trim() || /\d/.test(form.value.name)
+  errors.value.age = !form.value.age || isNaN(ageVal) || ageVal <= 0
   errors.value.country = !form.value.country
   errors.value.state = !form.value.state
   errors.value.county = !form.value.county
-  errors.value.height_cm = !form.value.height_cm || form.value.height_cm <= 0
-  errors.value.weight_kg = !form.value.weight_kg || form.value.weight_kg <= 0
+  errors.value.height_cm = !form.value.height_cm || parseFloat(form.value.height_cm) <= 0
+  errors.value.weight_kg = !form.value.weight_kg || parseFloat(form.value.weight_kg) <= 0
 
   if (errors.value.name || errors.value.age || errors.value.country || errors.value.state || errors.value.county || errors.value.height_cm || errors.value.weight_kg) {
     const firstErr = document.querySelector('.form-field.error')
@@ -569,15 +605,22 @@ const closeUploadModal = () => {
 const handleAnalyze = async () => {
   closeUploadModal()
   // Validate
-  errors.value.name = !form.value.name
-  errors.value.age = !form.value.age
-  errors.value.height_cm = !form.value.height_cm || form.value.height_cm <= 0
-  errors.value.weight_kg = !form.value.weight_kg || form.value.weight_kg <= 0
+  const ageVal = parseInt(form.value.age)
+  errors.value.name = !form.value.name || !form.value.name.trim() || /\d/.test(form.value.name)
+  errors.value.age = !form.value.age || isNaN(ageVal) || ageVal <= 0
+  errors.value.height_cm = !form.value.height_cm || parseFloat(form.value.height_cm) <= 0
+  errors.value.weight_kg = !form.value.weight_kg || parseFloat(form.value.weight_kg) <= 0
 
   const hasInvalidLocation = !form.value.locations || form.value.locations.length === 0 || form.value.locations.some(loc => !loc.country || !loc.state || !loc.county)
 
   if (errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg || hasInvalidLocation) {
-    showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and Location details.')
+    if (errors.value.name && /\d/.test(form.value.name)) {
+      showToast('Invalid Name', 'Numbers are not allowed in the Name field.')
+    } else if (errors.value.age && (isNaN(ageVal) || ageVal <= 0)) {
+      showToast('Invalid Age', 'Please enter a valid positive age (greater than 0).')
+    } else {
+      showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and Location details.')
+    }
     const firstErr = document.querySelector('.form-field.error')
     if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
@@ -1206,15 +1249,30 @@ const handleAnalyze = async () => {
                 <!-- Patient Name -->
                 <div class="form-field" :class="{ error: errors.name, 'ocr-extracted': ocrExtractedFields.name }">
                   <label>Name * </label>
-                  <input type="text" v-model="form.name" placeholder="e.g., Robert Chen" class="setup-input" />
-                  <span v-if="errors.name" class="err-msg">Name is required</span>
+                  <input 
+                    type="text" 
+                    :value="form.name" 
+                    @input="onNameInput" 
+                    placeholder="e.g., Robert Chen" 
+                    class="setup-input" 
+                    autocomplete="off"
+                  />
+                  <span v-if="errors.name" class="err-msg">Valid name without numbers is required</span>
                 </div>
 
                 <!-- Age -->
                 <div class="form-field" :class="{ error: errors.age, 'ocr-extracted': ocrExtractedFields.age }">
                   <label>Age *</label>
-                  <input type="number" v-model="form.age" placeholder="e.g., 54" class="setup-input" />
-                  <span v-if="errors.age" class="err-msg">Age is required</span>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="125"
+                    :value="form.age" 
+                    @input="onAgeInput" 
+                    placeholder="e.g., 54" 
+                    class="setup-input no-spin" 
+                  />
+                  <span v-if="errors.age" class="err-msg">Valid positive age is required</span>
                 </div>
 
                 <!-- Gender -->
@@ -1281,15 +1339,29 @@ const handleAnalyze = async () => {
                 <!-- Height (cm) -->
                 <div class="form-field" :class="{ error: errors.height_cm, 'ocr-extracted': ocrExtractedFields.height_cm }">
                   <label>Height (cm) *</label>
-                  <input type="number" v-model="form.height_cm" placeholder="e.g., 170" class="setup-input" />
-                  <span v-if="errors.height_cm" class="err-msg">Height is required</span>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    :value="form.height_cm" 
+                    @input="onHeightInput" 
+                    placeholder="e.g., 170" 
+                    class="setup-input no-spin" 
+                  />
+                  <span v-if="errors.height_cm" class="err-msg">Valid height is required</span>
                 </div>
 
                 <!-- Weight (kg) -->
                 <div class="form-field" :class="{ error: errors.weight_kg, 'ocr-extracted': ocrExtractedFields.weight_kg }">
                   <label>Weight (kg) *</label>
-                  <input type="number" v-model="form.weight_kg" placeholder="e.g., 70" class="setup-input" />
-                  <span v-if="errors.weight_kg" class="err-msg">Weight is required</span>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    :value="form.weight_kg" 
+                    @input="onWeightInput" 
+                    placeholder="e.g., 70" 
+                    class="setup-input no-spin" 
+                  />
+                  <span v-if="errors.weight_kg" class="err-msg">Valid weight is required</span>
                 </div>
 
               </div>
@@ -2003,6 +2075,24 @@ const handleAnalyze = async () => {
 .setup-textarea:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+/* Remove up/down increase/decrease spinner buttons */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button,
+.setup-input::-webkit-inner-spin-button,
+.setup-input::-webkit-outer-spin-button,
+.no-spin::-webkit-inner-spin-button,
+.no-spin::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+}
+
+input[type=number],
+.setup-input[type=number],
+.no-spin {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
 }
 
 .form-field.error .setup-input {

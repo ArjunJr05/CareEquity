@@ -21,6 +21,9 @@ export function setAgentReport(report) {
 export function setLocationRecords(records) {
   if (Array.isArray(records)) {
     locationRecords.value = records.slice(0, 5)
+    try {
+      localStorage.setItem('docpat_location_records', JSON.stringify(locationRecords.value))
+    } catch (e) {}
   }
 }
 
@@ -36,20 +39,39 @@ export function setMlInputPayload(data) {
   mlInputPayload.value = data
 }
 
-export const patientData = ref({
-  name: '',
-  age: '',
-  gender: 'Female',
-  diabetes: 'No',
-  hypertension: 'No',
-  heart_disease: 'No',
-  asthma: 'No',
-  previous_admission: 'No',
-  er_visits: 0,
-  lat: 41.4993,
-  long: -81.6944,
-  medication_adherence: 85,
-})
+const getInitialPatientData = () => {
+  try {
+    const saved = localStorage.getItem('docpat_patient_data')
+    if (saved) return JSON.parse(saved)
+  } catch (e) {}
+  return {
+    name: '',
+    age: '',
+    gender: 'Female',
+    state: '',
+    county: '',
+    diabetes: 'No',
+    hypertension: 'No',
+    heart_disease: 'No',
+    asthma: 'No',
+    previous_admission: 'No',
+    er_visits: 0,
+    lat: 41.4993,
+    long: -81.6944,
+    medication_adherence: 85,
+  }
+}
+
+export const patientData = ref(getInitialPatientData())
+
+const getInitialLocations = () => {
+  try {
+    const saved = localStorage.getItem('docpat_location_records')
+    if (saved) return JSON.parse(saved)
+  } catch (e) {}
+  return []
+}
+locationRecords.value = getInitialLocations()
 
 export const currentUserName = ref(localStorage.getItem('user_name') || '')
 export const currentUserEmail = ref(localStorage.getItem('user_email') || '')
@@ -193,6 +215,9 @@ export function setPatientData(data) {
     medication_adherence: 85,
     ...data
   }
+  try {
+    localStorage.setItem('docpat_patient_data', JSON.stringify(patientData.value))
+  } catch (e) {}
 }
 
 export function setShowLoginScreen(val) {

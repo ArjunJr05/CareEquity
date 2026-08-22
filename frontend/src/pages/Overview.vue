@@ -9,6 +9,66 @@ import { SYSTEM_BACKEND_URL, RAG_BACKEND_URL } from '../config'
 
 const router = useRouter()
 
+// US State Abbreviation Map
+const US_STATE_ABBR = {
+  'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
+  'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
+  'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+  'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+  'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
+  'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
+  'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+  'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+  'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
+  'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+  'District of Columbia': 'DC'
+}
+
+function getStateAbbr(stateName) {
+  if (!stateName) return ''
+  const trimmed = String(stateName).trim()
+  if (trimmed.length === 2) return trimmed.toUpperCase()
+  return US_STATE_ABBR[trimmed] || trimmed
+}
+
+function cleanCountyName(countyName) {
+  if (!countyName) return ''
+  return String(countyName).replace(/\s+County$/i, '').replace(/\s+Parish$/i, '').replace(/\s+Borough$/i, '').trim()
+}
+
+const activeStateAbbr = computed(() => {
+  const st = patientData.value?.state || locationRecords.value?.[0]?.state || predictionModelResults.value?.state || ''
+  return getStateAbbr(st)
+})
+
+const activeCounty = computed(() => {
+  const ct = patientData.value?.county || locationRecords.value?.[0]?.county || predictionModelResults.value?.county || ''
+  return String(ct).trim()
+})
+
+const activeLocationLabel = computed(() => {
+  const st = activeStateAbbr.value
+  const ct = activeCounty.value
+  if (ct && st) return `${ct.replace(/\s+County$/i, '')}, ${st}`
+  if (st) return st
+  if (ct) return ct
+  return ''
+})
+
+const tableauEmbedUrl = computed(() => {
+  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=no'
+  const params = []
+  
+  if (activeStateAbbr.value) {
+    params.push(`State Abbr=${encodeURIComponent(activeStateAbbr.value)}`)
+  }
+  if (activeCounty.value) {
+    params.push(`county clean=${encodeURIComponent(activeCounty.value)}`)
+  }
+  
+  return params.length > 0 ? `${baseUrl}&${params.join('&')}` : baseUrl
+})
+
 const mapLayers = ['Health Risk', 'Social Vulnerability', 'Food Access', 'Environmental Risk', 'Healthcare Access']
 const activeLayer = ref('Health Risk')
 const microscopeSrc = ref(`/assets/microscope.gif?t=${Date.now()}`)
@@ -319,6 +379,9 @@ function updateMapColors() {
 }
 
 onMounted(() => {
+  const mapEl = document.getElementById('leaflet-overview-map')
+  if (!mapEl) return
+
   map = L.map('leaflet-overview-map', {
     zoomControl: false,
     attributionControl: false
@@ -673,47 +736,27 @@ const handleSendMessage = () => {
       <div class="map-section-wrapper">
         <div class="map-row">
           <article class="card map-card">
-            <!-- Dropdown click-outside overlay -->
-            <div v-if="showFiltersDropdown" class="dropdown-overlay" @click="showFiltersDropdown = false"></div>
-
             <div class="map-head">
               <div>
                 <h3 class="font-bold">Health Equity Map</h3>
-                <p>Explore social determinants and health risks by community</p>
-              </div>
-              <div class="filter-dropdown-container" style="position: relative; display: inline-block;">
-                <button class="btn outline sm filter-trigger" @click="toggleFiltersDropdown" :class="{ 'btn-active': showFiltersDropdown }">
-                  <IconBase name="filter" :size="14" /> Filters
-                </button>
-                
-                <Transition name="fade">
-                  <div v-if="showFiltersDropdown" class="filter-dropdown-menu">
-                    <div class="dropdown-header">Select Map Layer</div>
-                    <button
-                      v-for="layer in mapLayers"
-                      :key="layer"
-                      class="dropdown-item"
-                      :class="{ active: layer === activeLayer }"
-                      @click="selectLayer(layer)"
-                    >
-                      <span class="status-indicator" :class="{ active: layer === activeLayer }"></span>
-                      {{ layer }}
-                    </button>
-                  </div>
-                </Transition>
+                <p>
+                  Explore social determinants and health risks by community
+                  <span v-if="activeLocationLabel" style="margin-left: 6px; font-weight: 600; color: #4f46e5; background: rgba(79, 70, 229, 0.08); padding: 2px 8px; border-radius: 4px; font-size: 0.72rem;">
+                    📍 {{ activeLocationLabel }}
+                  </span>
+                </p>
               </div>
             </div>
-
             <div class="map-canvas">
-              <!-- Custom zoom controls -->
-              <div class="zoom-controls" style="z-index: 1000;">
-                <button @click="zoomIn"><IconBase name="plus" :size="15" /></button>
-                <button @click="zoomOut"><IconBase name="minus" :size="15" /></button>
-                <button @click="resetMap"><IconBase name="locate" :size="15" /></button>
-              </div>
-
-              <!-- Leaflet Real Map Container -->
-              <div id="leaflet-overview-map" style="width: 100%; height: 100%;"></div>
+              <iframe
+                :key="tableauEmbedUrl"
+                :src="tableauEmbedUrl"
+                class="tableau-iframe"
+                title="CareEquity Map Tableau Interactive View"
+                allow="fullscreen; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+                loading="eager"
+              ></iframe>
             </div>
           </article>
 
@@ -1217,8 +1260,18 @@ const handleSendMessage = () => {
   overflow: hidden;
   border: 1px solid var(--border);
   flex: 1;
-  min-height: 360px;
-  background: #f8fafc;
+  min-height: 380px;
+  background: #ffffff;
+}
+
+.map-canvas .tableau-iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% + 30px);
+  border: none;
+  display: block;
 }
 
 .zoom-controls {
