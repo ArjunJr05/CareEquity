@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userPlan, setUserPlan } from '../store/appState'
+import { userPlan, setUserPlan, setShowLoginScreen } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
 
 const router = useRouter()
@@ -93,7 +93,28 @@ const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, order
 const selectPlan = async (planKey, title) => {
   const currentCycle = planKey === 'free' ? '15_days' : (isYearly.value ? 'yearly' : 'monthly')
 
-  // Initiate Razorpay Checkout for all plans
+  // FREE Plan: Directly activate without Razorpay payment modal or login check
+  if (planKey === 'free') {
+    isProcessingPayment.value = true
+    const freePayId = 'free_trial_15_days'
+    await saveSubscriptionToBackend('free', '15_days', freePayId)
+    setUserPlan('free')
+    selectedPlanTitle.value = title
+    paymentDetails.value = { razorpay_payment_id: 'Free 15-Day Trial (No Card Needed)' }
+    isProcessingPayment.value = false
+    showConfirmationModal.value = true
+    return
+  }
+
+  // Paid Plans (Basic / Pro): If NOT logged in, redirect to login page first!
+  const loggedInState = localStorage.getItem('docpat_logged_in') === 'true'
+  if (!loggedInState) {
+    setShowLoginScreen(true)
+    router.push('/login')
+    return
+  }
+
+  // User is Logged In: Initiate Razorpay Checkout for Basic / Pro
   isProcessingPayment.value = true
   await loadRazorpaySDK()
 
@@ -231,12 +252,11 @@ const defaultPlans = [
     yearlyPrice: 0,
     subtitle: 'Get started with a 15-day free trial — no credit card required. Full access to essential SDOH features.',
     features: [
-      'SDOH profile',
-      'Basic SDOH assessment',
-      'Nearby healthcare resources',
-      'Food & nutrition resources',
+      '15-Day Full Access Trial',
+      '50,000 AI Chatbot Tokens',
+      'SDOH profile & basic assessment',
+      'Nearby healthcare & food resources',
       'Basic location map',
-      'Chat bot assistance',
       'Basic resource search',
       'Limited personalized recommendations'
     ],
@@ -253,13 +273,13 @@ const defaultPlans = [
     subtitle: 'Designed for care navigators & individuals — essential SDOH tools with personalized support.',
     features: [
       'Up to 100 patient SDOH assessments',
+      '250,000 AI Chatbot Tokens',
       'CareMap 3D view & live OSRM directions',
-      'SDOH Risk Score & detailed assessment insights',
-      'Personalized community resource recommendations',
+      'SDOH Risk Score & detailed insights',
+      'Personalized community recommendations',
       'Automated intervention matching engine',
       'Basic PDF & CSV report exports',
-      'Email helpdesk support',
-      'Chat bot unlimited'
+      'Email helpdesk support'
     ],
     buttonText: 'Subscribed',
     buttonClass: 'btn-primary',
@@ -274,13 +294,13 @@ const defaultPlans = [
     subtitle: 'Advanced SDOH analytics, AI insights, and predictive intelligence.',
     features: [
       'Up to 500 patient SDOH assessments',
+      'Unlimited AI Chatbot Tokens',
       'CareMap 3D view & live OSRM directions',
       'Advanced SDOH Risk Score & analytics',
       'AI-powered SDOH resource recommendations',
       'Automated intervention matching engine',
       'Advanced PDF & CSV report exports',
-      'Equity Map & population-level insights',
-      'AI SDOH Assistant for personalized guidance'
+      'Equity Map & population-level insights'
     ],
     buttonText: 'Get Pro',
     buttonClass: 'btn-primary',

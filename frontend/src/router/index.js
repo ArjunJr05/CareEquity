@@ -18,38 +18,16 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     {
-      path: '/setup',
+      path: '/',
       name: 'setup',
       component: DataSetup,
     },
     {
-      path: '/login',
-      name: 'login',
-      component: Login,
+      path: '/setup',
+      redirect: '/',
     },
     {
-      path: '/admin',
-      name: 'admin',
-      component: Admin,
-    },
-    {
-      path: '/admin/users',
-      name: 'admin-users',
-      component: AdminUsers,
-    },
-    {
-      path: '/admin/plans',
-      name: 'admin-plans',
-      component: AdminPlans,
-    },
-    {
-      path: '/plan',
-      alias: '/plans',
-      name: 'plan',
-      component: Plan,
-    },
-    {
-      path: '/',
+      path: '/overview',
       name: 'overview',
       component: Overview,
     },
@@ -79,6 +57,32 @@ const router = createRouter({
       component: Interventions,
     },
     {
+      path: '/login',
+      name: 'login',
+      component: Login,
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: Admin,
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: AdminUsers,
+    },
+    {
+      path: '/admin/plans',
+      name: 'admin-plans',
+      component: AdminPlans,
+    },
+    {
+      path: '/plan',
+      alias: '/plans',
+      name: 'plan',
+      component: Plan,
+    },
+    {
       path: '/reports',
       name: 'reports',
       component: Reports,
@@ -96,12 +100,6 @@ router.beforeEach((to, from, next) => {
   } else {
     if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans') {
       next({ name: 'login' })
-    } else if (to.name !== 'setup' && to.name !== 'login' && to.name !== 'plan' && !isAnalyzed.value) {
-      if (to.name === 'setup') {
-        next()
-      } else {
-        next({ name: 'setup' })
-      }
     } else {
       next()
     }
