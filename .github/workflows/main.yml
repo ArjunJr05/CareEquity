@@ -62,6 +62,7 @@ jobs:
           df -h
 
       - name: Build and Start CareEquity Multi-Container Stack
+        timeout-minutes: 15
         run: |
           docker compose up -d --build --remove-orphans
 
