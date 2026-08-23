@@ -1,10 +1,90 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import IconBase from '../components/dashboard/IconBase.vue'
-import { patientData, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
-import L from 'leaflet'
+import { patientData, locationRecords, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
 
-import 'leaflet/dist/leaflet.css'
+// US State Abbreviation Map
+const US_STATE_ABBR = {
+  'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
+  'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
+  'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+  'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+  'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
+  'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
+  'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+  'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+  'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
+  'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+  'District of Columbia': 'DC'
+}
+
+function getStateAbbr(stateName) {
+  if (!stateName) return ''
+  const trimmed = String(stateName).trim()
+  if (trimmed.length === 2) return trimmed.toUpperCase()
+  return US_STATE_ABBR[trimmed] || trimmed
+}
+
+function cleanCountyName(countyName) {
+  if (!countyName) return ''
+  return String(countyName).replace(/\s+County$/i, '').replace(/\s+Parish$/i, '').replace(/\s+Borough$/i, '').trim()
+}
+
+const activeStateAbbr = computed(() => {
+  const st = patientData.value?.state || locationRecords.value?.[0]?.state || predictionModelResults.value?.state || ''
+  return getStateAbbr(st)
+})
+
+const activeCounty = computed(() => {
+  const ct = patientData.value?.county || locationRecords.value?.[0]?.county || predictionModelResults.value?.county || ''
+  return String(ct).trim()
+})
+
+const activeLocationLabel = computed(() => {
+  const st = activeStateAbbr.value
+  const ct = activeCounty.value
+  if (ct && st) return `${ct.replace(/\s+County$/i, '')}, ${st}`
+  if (st) return st
+  if (ct) return ct
+  return ''
+})
+
+// Tableau State
+const tableauKey = ref(0)
+const isFullscreen = ref(false)
+const isVizLoading = ref(true)
+
+const tableauEmbedUrl = computed(() => {
+  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=no'
+  const params = []
+  
+  if (activeStateAbbr.value) {
+    params.push(`State Abbr=${encodeURIComponent(activeStateAbbr.value)}`)
+  }
+  if (activeCounty.value) {
+    params.push(`county clean=${encodeURIComponent(activeCounty.value)}`)
+  }
+  
+  return params.length > 0 ? `${baseUrl}&${params.join('&')}` : baseUrl
+})
+
+const tableauPublicUrl = 'https://public.tableau.com/app/profile/harish.r2464/viz/CareEquity_Map/Sheet2?publish=yes'
+
+function reloadTableau() {
+  isVizLoading.value = true
+  tableauKey.value++
+  setTimeout(() => {
+    isVizLoading.value = false
+  }, 1000)
+}
+
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value
+}
+
+function onIframeLoad() {
+  isVizLoading.value = false
+}
 
 // List of map layers
 const mapLayers = [
@@ -312,179 +392,6 @@ const kpiStats = computed(() => {
 })
 
 
-// Leaflet Map Reference
-let map = null
-const polygonLayers = {}
-
-// Helper to determine polygon color based on score and active layer
-function getPolygonColor(communityId, layer) {
-  const comm = communities[communityId]
-  let val = 0
-  if (layer === 'health') val = parseFloat(comm.healthRisk) * 100
-  else if (layer === 'svi') val = parseFloat(comm.sviScore) * 100
-  else if (layer === 'food') val = parseFloat(comm.foodAccess) * 100
-  else if (layer === 'env') val = parseFloat(comm.environmental) * 100
-  else if (layer === 'care') val = parseFloat(comm.healthcareAccess) * 100
-
-  if (val <= 20) return '#93c5fd'
-  if (val <= 40) return '#86efac'
-  if (val <= 60) return '#fde047'
-  if (val <= 80) return '#fed7aa'
-  return '#fca5a5'
-}
-
-function updateMapColors() {
-  Object.keys(polygonLayers).forEach(id => {
-    const poly = polygonLayers[id]
-    if (poly) {
-      poly.setStyle({
-        fillColor: getPolygonColor(id, activeLayer.value),
-        color: selectedId.value === id ? '#4f46e5' : '#ffffff',
-        weight: selectedId.value === id ? 3 : 1.5
-      })
-    }
-  })
-}
-
-// Leaflet Map Initialization
-onMounted(() => {
-  // Centered roughly in the Midwest region containing OH, MI, IN
-  map = L.map('leaflet-map', {
-    zoomControl: false,
-    attributionControl: false
-  }).setView([41.1, -83.5], 6)
-
-  // Use crisp Voyager tiles from CartoDB which match the dashboard theme
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19
-  }).addTo(map)
-
-  // Add County Polygons
-  Object.keys(communities).forEach(id => {
-    const comm = communities[id]
-    const polygon = L.polygon(comm.bounds, {
-      fillColor: getPolygonColor(id, activeLayer.value),
-      fillOpacity: 0.65,
-      color: selectedId.value === id ? '#4f46e5' : '#ffffff',
-      weight: selectedId.value === id ? 3 : 1.5
-    }).addTo(map)
-
-    // Event handlers
-    polygon.on('click', () => {
-      selectedId.value = id
-      polygon.openPopup()
-    })
-
-    polygon.on('mouseover', () => {
-      polygon.setStyle({ fillOpacity: 0.85, weight: 2.5 })
-    })
-
-    polygon.on('mouseout', () => {
-      polygon.setStyle({
-        fillOpacity: 0.65,
-        weight: selectedId.value === id ? 3 : 1.5
-      })
-    })
-
-    // Bind popup tooltip
-    const popupContent = `
-      <div style="font-family: sans-serif; font-size: 11px; min-width: 150px;">
-        <b style="font-size:12px; color:#1e293b;">${comm.name}</b><br/>
-        <span style="color:#64748b;">Population: ${comm.population}</span><br/>
-        <span style="color:#ef4444;">Health Risk: ${comm.healthRisk}</span>
-      </div>
-    `
-    polygon.bindPopup(popupContent)
-
-    polygonLayers[id] = polygon
-  })
-
-  // Add Patient Pin Marker (using dynamic geolocated coordinates)
-  if (patientData.value && patientData.value.name) {
-    const patientIcon = L.divIcon({
-      className: 'custom-patient-icon',
-      html: `
-        <div style="position:relative; width: 14px; height: 14px;">
-          <div class="pulse-ring-leaflet"></div>
-          <div style="width: 8px; height: 8px; background: #4f46e5; border: 2px solid white; border-radius: 50%;"></div>
-        </div>
-      `,
-      iconSize: [14, 14]
-    })
-    const lat = parseFloat(patientData.value.lat) || 41.48
-    const long = parseFloat(patientData.value.long) || -81.65
-    
-    const hasPred = !!predictionModelResults.value
-    const pred = predictionModelResults.value
-    let popupText = `<b>${patientData.value.name} (Patient Location)</b>`
-    if (hasPred) {
-      popupText += `<br/><b>Location:</b> ${pred.city}, ${pred.state}`
-      popupText += `<br/><b>Risk Score:</b> ${pred.overall_risk_category} (${pred.overall_risk_score.toFixed(2)})`
-    }
-    
-    const marker = L.marker([lat, long], { icon: patientIcon })
-      .addTo(map)
-      .bindPopup(popupText)
-      
-    marker.on('click', () => {
-      map.panTo([lat, long])
-      marker.openPopup()
-    })
-  }
-
-  if (isAnalyzed.value && patientData.value && patientData.value.lat) {
-    map.setView([parseFloat(patientData.value.lat), parseFloat(patientData.value.long)], 8)
-  } else {
-    // Adjust view to fit all bounding areas
-    const allBounds = Object.values(communities).map(c => c.bounds)
-    const mergedBounds = L.latLngBounds(allBounds.flat())
-    map.fitBounds(mergedBounds, { padding: [20, 20] })
-  }
-})
-
-onUnmounted(() => {
-  if (map) {
-    map.remove()
-  }
-})
-
-// Watchers to update styles dynamically
-watch(isAnalyzed, (analyzed) => {
-  if (analyzed && map && patientData.value.lat) {
-    map.panTo([parseFloat(patientData.value.lat), parseFloat(patientData.value.long)])
-  }
-}, { immediate: true })
-
-watch(activeLayer, () => {
-  updateMapColors()
-})
-
-watch(selectedId, (newId) => {
-  updateMapColors()
-  if (newId && map) {
-    const comm = communities[newId]
-    if (comm) {
-      map.panTo(comm.center)
-      const poly = polygonLayers[newId]
-      if (poly) poly.openPopup()
-    }
-  }
-})
-
-// Custom zoom controls
-const zoomIn = () => {
-  if (map) map.zoomIn()
-}
-const zoomOut = () => {
-  if (map) map.zoomOut()
-}
-const resetMap = () => {
-  if (map) {
-    const allBounds = Object.values(communities).map(c => c.bounds)
-    map.fitBounds(L.latLngBounds(allBounds.flat()), { padding: [20, 20] })
-  }
-}
-
 // Radar Chart Helper Methods
 const cx = 120
 const cy = 90
@@ -600,91 +507,50 @@ const axes = [
           </div>
         </section>
 
-        <!-- Map Layer Toolbar -->
-        <section class="toolbar-section">
-          <div class="layer-selector">
-            <span class="lbl">Map Layer</span>
-            <div class="layer-capsule-wrapper">
-              <button class="scroll-arrow-btn left" @click="scrollCapsuleLeft" title="Scroll Left">
-                <IconBase name="chevron-left" :size="12" />
+        <!-- Tableau Interactive Map Container -->
+        <div class="map-wrapper" :class="{ 'is-fullscreen': isFullscreen }">
+          <!-- Top Control Header Bar -->
+          <div class="tableau-topbar">
+            <div class="tableau-info">
+              <span class="live-indicator">
+                <span class="dot-pulse"></span>
+                LIVE VIZ
+              </span>
+              <span class="viz-title">CareEquity Health Disparities & Risk Map</span>
+            </div>
+
+            <div class="tableau-actions">
+              <button class="tb-btn" @click="reloadTableau" title="Reload Map View">
+                <IconBase name="refresh" :size="13" />
+                <span>Reload</span>
               </button>
-              <div ref="layerCapsuleRef" class="layer-capsule">
-                <button 
-                  v-for="layer in mapLayers" 
-                  :key="layer.id"
-                  class="layer-btn"
-                  :class="{ active: activeLayer === layer.id }"
-                  @click="activeLayer = layer.id"
-                >
-                  {{ layer.name }}
-                </button>
-              </div>
-              <button class="scroll-arrow-btn right" @click="scrollCapsuleRight" title="Scroll Right">
-                <IconBase name="chevron-right" :size="12" />
+              <button class="tb-btn" @click="toggleFullscreen" title="Toggle Fullscreen View">
+                <IconBase name="maximize" :size="13" />
+                <span>{{ isFullscreen ? 'Exit Fullscreen' : 'Fullscreen' }}</span>
               </button>
             </div>
           </div>
 
-          
-        </section>
-
-        <!-- Leaflet Map Container -->
-        <div class="map-wrapper">
-          <!-- Floating Controls on the left -->
-          <div class="map-controls">
-            <button @click="zoomIn" title="Zoom In"><IconBase name="plus" :size="14" /></button>
-            <button @click="zoomOut" title="Zoom Out"><IconBase name="minus" :size="14" /></button>
-            <button @click="resetMap" title="Reset View"><IconBase name="home" :size="14" /></button>
-            <button title="Layers"><IconBase name="filter" :size="14" /></button>
+          <!-- Loading indicator -->
+          <div v-if="isVizLoading" class="tableau-loader">
+            <div class="spinner"></div>
+            <p>Loading Map View...</p>
           </div>
 
-          <!-- Color scale legend overlay bottom-left -->
-          <div class="map-legend">
-            <p class="legend-title">Health Risk Score <span class="light">(Population Weighted)</span></p>
-            <div class="legend-colors">
-              <div class="legend-item"><span class="color blue"></span> 0 - 20 <span>Low</span></div>
-              <div class="legend-item"><span class="color green"></span> 21 - 40 <span>Low-Mod</span></div>
-              <div class="legend-item"><span class="color yellow"></span> 41 - 60 <span>Mod</span></div>
-              <div class="legend-item"><span class="color orange"></span> 61 - 80 <span>High</span></div>
-              <div class="legend-item"><span class="color red"></span> 81 - 100 <span>Very High</span></div>
-            </div>
+          <!-- Tableau Iframe Container -->
+          <div class="tableau-frame-container">
+            <iframe
+              :key="`${tableauEmbedUrl}-${tableauKey}`"
+              :src="tableauEmbedUrl"
+              class="tableau-iframe"
+              title="CareEquity Map Tableau Interactive View"
+              @load="onIframeLoad"
+              allow="fullscreen; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+              loading="eager"
+            ></iframe>
           </div>
-
-          <!-- Real Map Element -->
-          <div id="leaflet-map" style="width: 100%; height: 100%;"></div>
         </div>
-
-        <!-- Equity Trends Footer Row -->
-        <section class="trends-footer">
-          <p class="section-title"><IconBase name="trend" :size="13" /> Equity Trends <span class="light">(vs last 30 days)</span></p>
-          <div class="trends-grid">
-            <div class="trend-item">
-              <span class="icon-indicator red-dot"></span>
-              <span class="lbl">Health Risk</span>
-              <span class="val font-semibold red-text">&uarr; 8.6%</span>
-            </div>
-            <div class="trend-item">
-              <span class="icon-indicator red-dot"></span>
-              <span class="lbl">Social Vulnerability</span>
-              <span class="val font-semibold red-text">&uarr; 6.3%</span>
-            </div>
-            <div class="trend-item">
-              <span class="icon-indicator green-dot"></span>
-              <span class="lbl">Food Access</span>
-              <span class="val font-semibold green-text">&uarr; 7.2%</span>
-            </div>
-            <div class="trend-item">
-              <span class="icon-indicator red-dot"></span>
-              <span class="lbl">Environmental Risk</span>
-              <span class="val font-semibold red-text">&uarr; 9.1%</span>
-            </div>
-            <div class="trend-item">
-              <span class="icon-indicator green-dot"></span>
-              <span class="lbl">Healthcare Access</span>
-              <span class="val font-semibold green-text">&uarr; 5.4%</span>
-            </div>
-          </div>
-        </section>
 
       </div>
 
@@ -1150,121 +1016,183 @@ const axes = [
 
 /* Map wrapper */
 .map-wrapper {
-  background: #f1f5f9;
+  background: #ffffff;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  height: 600px;
+  height: 650px;
   position: relative;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
-}
-
-/* Patient Pin Marker */
-:deep(.pulse-ring-leaflet) {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(79, 70, 229, 0.4);
-  animation: pulse-ring-anim 2s infinite ease-in-out;
-}
-
-@keyframes pulse-ring-anim {
-  0% { transform: scale(0.6); opacity: 1; }
-  100% { transform: scale(1.8); opacity: 0; }
-}
-
-/* Float Map Controls */
-.map-controls {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow-sm);
-  z-index: 1000;
+  transition: all 0.25s ease;
 }
 
-.map-controls button {
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
+.map-wrapper.is-fullscreen {
+  position: fixed;
+  inset: 16px;
+  height: auto;
+  z-index: 99999;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+  background: #ffffff;
+}
+
+/* Tableau Topbar */
+.tableau-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.tableau-info {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-}
-
-.map-controls button:last-child {
-  border-bottom: none;
-}
-
-.map-controls button:hover {
-  background: #f1f5f9;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
 }
 
-/* Map legend */
-.map-legend {
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  box-shadow: var(--shadow-sm);
-  z-index: 1000;
-}
-
-.legend-title {
-  margin: 0 0 6px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--text-primary);
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.legend-title .light {
-  color: var(--text-tertiary);
-  font-weight: 500;
+.dot-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3);
+  animation: pulse-dot 1.8s infinite ease-in-out;
 }
 
-.legend-colors {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+@keyframes pulse-dot {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.15); }
+  100% { transform: scale(0.9); opacity: 0.8; }
 }
 
-.legend-item {
-  font-size: 0.65rem;
-  font-weight: 600;
+.viz-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.viz-sub {
   color: var(--text-secondary);
+  font-weight: 400;
+  font-size: 0.72rem;
+}
+
+.tableau-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.legend-item .color {
-  width: 14px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
 }
 
-.legend-item .color.blue { background: #93c5fd; }
-.legend-item .color.green { background: #86efac; }
-.legend-item .color.yellow { background: #fde047; }
-.legend-item .color.orange { background: #fed7aa; }
-.legend-item .color.red { background: #fca5a5; }
+.tb-btn:hover {
+  background: #f1f5f9;
+  color: var(--text-primary);
+  border-color: #cbd5e1;
+}
+
+.tb-btn.highlight {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+}
+
+.tb-btn.highlight:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+/* Tableau Frame Container */
+.tableau-frame-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.tableau-iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% + 30px);
+  border: none;
+  display: block;
+}
+
+/* Loader */
+.tableau-loader {
+  position: absolute;
+  inset: 42px 0 0 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 /* Trends Footer block */
 .trends-footer {

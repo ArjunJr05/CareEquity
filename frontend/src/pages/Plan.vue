@@ -1,9 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userPlan, setUserPlan } from '../store/appState'
+import { userPlan, setUserPlan, setShowLoginScreen, isLoggedIn } from '../store/appState'
 import { MAIN_BACKEND_URL, RAZORPAY_KEY_ID } from '../config'
-import { LOGO_BASE64 } from '../assets/logoBase64.js'
 
 const router = useRouter()
 const isYearly = ref(false)
@@ -11,6 +10,10 @@ const showConfirmationModal = ref(false)
 const selectedPlanTitle = ref('')
 const paymentDetails = ref(null)
 const isProcessingPayment = ref(false)
+
+const activeSub = computed(() => {
+  return isLoggedIn.value ? userPlan.value : null
+})
 
 const loadRazorpaySDK = () => {
   return new Promise((resolve) => {
@@ -26,43 +29,104 @@ const loadRazorpaySDK = () => {
   })
 }
 
-onMounted(() => {
-  loadRazorpaySDK()
-})
-
 const toggleBilling = (mode) => {
   isYearly.value = mode === 'yearly'
 }
 
 const handleExit = () => {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push('/')
+  router.push('/')
+}
+
+const saveSubscriptionToBackend = async (planKey, cycle, paymentId = null, orderId = null, signature = null) => {
+  const userEmail = localStorage.getItem('user_email') || 'doctor@careequity.com'
+  const storedUserId = localStorage.getItem('user_id')
+  const parsedUserId = storedUserId ? parseInt(storedUserId) : null
+
+  const payload = {
+    razorpay_payment_id: paymentId || (planKey === 'free' ? 'free_trial_15_days' : `pay_${Math.random().toString(36).substring(2, 12)}`),
+    razorpay_order_id: orderId || null,
+    razorpay_signature: signature || null,
+    plan: planKey,
+    billing_cycle: cycle,
+    user_email: userEmail,
+    user_id: parsedUserId
+  }
+
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/payments/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (res.ok) {
+      const data = await res.json()
+      console.log('Subscription saved successfully in PostgreSQL:', data)
+      if (data.user_id && !localStorage.getItem('user_id')) {
+        localStorage.setItem('user_id', data.user_id)
+      }
+      setUserPlan(planKey)
+      return data
+    }
+  } catch (e) {
+    console.warn('verify-payment error, trying direct subscribe:', e)
+  }
+
+  // Backup fallback: direct /api/subscriptions/subscribe
+  try {
+    const res2 = await fetch(`${MAIN_BACKEND_URL}/api/subscriptions/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: parsedUserId,
+        user_email: userEmail,
+        subscribe: true,
+        plan: planKey,
+        validity: cycle
+      })
+    })
+    if (res2.ok) {
+      const data2 = await res2.json()
+      console.log('Direct subscription saved:', data2)
+      return data2
+    }
+  } catch (err2) {
+    console.error('Subscription backend save error:', err2)
   }
 }
 
 const selectPlan = async (planKey, title) => {
-  if (userPlan.value === planKey) {
-    return
-  }
+  const currentCycle = planKey === 'free' ? '15_days' : (isYearly.value ? 'yearly' : 'monthly')
 
-  // 1. If FREE plan, activate directly without payment checkout
+  // FREE Plan: Directly activate without Razorpay payment modal or login check
   if (planKey === 'free') {
+    isProcessingPayment.value = true
+    const freePayId = 'free_trial_15_days'
+    await saveSubscriptionToBackend('free', '15_days', freePayId)
     setUserPlan('free')
     selectedPlanTitle.value = title
-    paymentDetails.value = null
+    paymentDetails.value = { razorpay_payment_id: 'Free 15-Day Trial (No Card Needed)' }
+    isProcessingPayment.value = false
     showConfirmationModal.value = true
     return
   }
 
-  // 2. For paid plans (BASIC / PRO), initiate Razorpay Checkout
+  // Paid Plans (Basic / Pro): If NOT logged in, redirect to login page first!
+  const loggedInState = localStorage.getItem('docpat_logged_in') === 'true'
+  if (!loggedInState) {
+    setShowLoginScreen(true)
+    router.push('/login')
+    return
+  }
+
+  // User is Logged In: Initiate Razorpay Checkout for Basic / Pro
   isProcessingPayment.value = true
   await loadRazorpaySDK()
 
-  const targetPlan = plans.value.find(p => p.key === planKey)
-  const monthlyOrYearlyPrice = isYearly.value ? targetPlan.yearlyPrice * 12 : targetPlan.monthlyPrice
-  const amountInPaise = Math.round(monthlyOrYearlyPrice * 100)
+  const targetPlan = plans.value.find(p => p.key === planKey) || { monthlyPrice: 0, yearlyPrice: 0 }
+  const rawPrice = isYearly.value ? (targetPlan.yearlyPrice * 12) : targetPlan.monthlyPrice
+  // Razorpay minimum charge is ₹1 token auth for free trial verification, or plan price for paid plans
+  const chargeAmount = planKey === 'free' ? 1 : Math.max(1, rawPrice)
+  const amountInPaise = Math.round(chargeAmount * 100)
 
   let razorpayOrderId = null
   let activeKeyId = RAZORPAY_KEY_ID
@@ -74,8 +138,8 @@ const selectPlan = async (planKey, title) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         plan: planKey,
-        billing_cycle: isYearly.value ? 'yearly' : 'monthly',
-        amount: monthlyOrYearlyPrice,
+        billing_cycle: currentCycle,
+        amount: chargeAmount,
         user_email: localStorage.getItem('user_email') || 'doctor@careequity.com'
       })
     })
@@ -90,30 +154,35 @@ const selectPlan = async (planKey, title) => {
     console.warn('Backend payment order fallback:', err)
   }
 
+  const activateFallbackSubscription = async () => {
+    isProcessingPayment.value = false
+    const fallbackPayId = `pay_sim_${Math.random().toString(36).substring(2, 10)}`
+    await saveSubscriptionToBackend(planKey, currentCycle, fallbackPayId)
+    setUserPlan(planKey)
+    selectedPlanTitle.value = title
+    paymentDetails.value = { razorpay_payment_id: fallbackPayId }
+    showConfirmationModal.value = true
+  }
+
   const options = {
     key: activeKeyId,
     amount: amountInPaise,
     currency: 'INR',
     name: 'CareEquity',
-    description: `${title} Plan (${isYearly.value ? 'Billed Yearly' : 'Billed Monthly'})`,
-    image: LOGO_BASE64,
-    order_id: razorpayOrderId || undefined,
+    description: planKey === 'free' 
+      ? '15-Day Free Trial Activation (Token Auth ₹1)' 
+      : `${title} Plan (${isYearly.value ? 'Billed Yearly' : 'Billed Monthly'})`,
+    image: (typeof window !== 'undefined' ? window.location.origin : '') + '/assets/careequity_logo.png',
+    ...(razorpayOrderId ? { order_id: razorpayOrderId } : {}),
     handler: async function (response) {
       isProcessingPayment.value = false
-      try {
-        await fetch(`${MAIN_BACKEND_URL}/api/payments/verify-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_order_id: response.razorpay_order_id,
-            razorpay_signature: response.razorpay_signature,
-            plan: planKey
-          })
-        })
-      } catch (verifyErr) {
-        console.warn('Payment verify fallback:', verifyErr)
-      }
+      await saveSubscriptionToBackend(
+        planKey,
+        currentCycle,
+        response.razorpay_payment_id,
+        response.razorpay_order_id,
+        response.razorpay_signature
+      )
 
       setUserPlan(planKey)
       paymentDetails.value = response
@@ -136,23 +205,49 @@ const selectPlan = async (planKey, title) => {
   }
 
   if (window.Razorpay) {
-    const rzp = new window.Razorpay(options)
-    rzp.open()
+    try {
+      const rzp = new window.Razorpay(options)
+      rzp.on('payment.failed', function (response) {
+        console.error('Razorpay payment failed:', response.error)
+        isProcessingPayment.value = false
+      })
+      rzp.open()
+    } catch (err) {
+      console.warn('Razorpay checkout initialization error:', err)
+      await activateFallbackSubscription()
+    }
   } else {
-    // Fallback if Razorpay SDK script is blocked
-    isProcessingPayment.value = false
-    setUserPlan(planKey)
-    selectedPlanTitle.value = title
-    paymentDetails.value = { razorpay_payment_id: `pay_test_${Math.random().toString(36).substring(2, 10)}` }
-    showConfirmationModal.value = true
+    await activateFallbackSubscription()
   }
 }
 
 const closeConfirmation = () => {
   showConfirmationModal.value = false
+  router.push('/')
 }
 
-const plans = computed(() => [
+const dynamicPlans = ref([])
+
+const fetchDynamicPlans = async () => {
+  try {
+    const res = await fetch(`${MAIN_BACKEND_URL}/api/subscriptions/plans`)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        dynamicPlans.value = data
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch dynamic plans, using defaults:', err)
+  }
+}
+
+onMounted(() => {
+  loadRazorpaySDK()
+  fetchDynamicPlans()
+})
+
+const defaultPlans = [
   {
     key: 'free',
     title: 'FREE',
@@ -161,12 +256,11 @@ const plans = computed(() => [
     yearlyPrice: 0,
     subtitle: 'Get started with a 15-day free trial — no credit card required. Full access to essential SDOH features.',
     features: [
-      'SDOH profile',
-      'Basic SDOH assessment',
-      'Nearby healthcare resources',
-      'Food & nutrition resources',
+      '15-Day Full Access Trial',
+      '50,000 AI Chatbot Tokens',
+      'SDOH profile & basic assessment',
+      'Nearby healthcare & food resources',
       'Basic location map',
-      'Chat bot assistance',
       'Basic resource search',
       'Limited personalized recommendations'
     ],
@@ -183,15 +277,15 @@ const plans = computed(() => [
     subtitle: 'Designed for care navigators & individuals — essential SDOH tools with personalized support.',
     features: [
       'Up to 100 patient SDOH assessments',
+      '250,000 AI Chatbot Tokens',
       'CareMap 3D view & live OSRM directions',
-      'SDOH Risk Score & detailed assessment insights',
-      'Personalized community resource recommendations',
+      'SDOH Risk Score & detailed insights',
+      'Personalized community recommendations',
       'Automated intervention matching engine',
       'Basic PDF & CSV report exports',
-      'Email helpdesk support',
-      'Chat bot unlimited'
+      'Email helpdesk support'
     ],
-    buttonText: 'Subscribed',
+    buttonText: 'Select Basic',
     buttonClass: 'btn-primary',
     isPopular: true
   },
@@ -204,19 +298,40 @@ const plans = computed(() => [
     subtitle: 'Advanced SDOH analytics, AI insights, and predictive intelligence.',
     features: [
       'Up to 500 patient SDOH assessments',
+      'Unlimited AI Chatbot Tokens',
       'CareMap 3D view & live OSRM directions',
       'Advanced SDOH Risk Score & analytics',
       'AI-powered SDOH resource recommendations',
       'Automated intervention matching engine',
       'Advanced PDF & CSV report exports',
-      'Equity Map & population-level insights',
-      'AI SDOH Assistant for personalized guidance'
+      'Equity Map & population-level insights'
     ],
     buttonText: 'Get Pro',
     buttonClass: 'btn-primary',
     isPopular: false
   }
-])
+]
+
+const plans = computed(() => {
+  if (dynamicPlans.value && dynamicPlans.value.length > 0) {
+    return dynamicPlans.value.map(dp => {
+      const match = defaultPlans.find(d => d.key === dp.key) || {}
+      return {
+        key: dp.key,
+        title: dp.title || match.title,
+        icon: dp.icon || match.icon || (dp.key === 'free' ? 'gift' : (dp.key === 'basic' ? 'shield' : 'crown')),
+        monthlyPrice: Number(dp.monthlyPrice ?? match.monthlyPrice ?? 0),
+        yearlyPrice: Number(dp.yearlyPrice ?? match.yearlyPrice ?? 0),
+        subtitle: dp.subtitle || match.subtitle,
+        features: dp.features && dp.features.length > 0 ? dp.features : (match.features || []),
+        buttonText: dp.key === 'free' ? 'Start Free' : (activeSub.value === dp.key ? 'Subscribed' : (dp.key === 'basic' ? 'Select Basic' : 'Get Pro')),
+        buttonClass: dp.key === 'free' ? 'btn-outline' : 'btn-primary',
+        isPopular: dp.isPopular !== undefined ? dp.isPopular : (match.isPopular || false)
+      }
+    })
+  }
+  return defaultPlans
+})
 </script>
 
 <template>
@@ -346,13 +461,11 @@ const plans = computed(() => [
           v-for="plan in plans" 
           :key="plan.key" 
           class="plan-card"
-          :class="{ 'active-plan': userPlan === plan.key }"
+          :class="{ 'active-plan': activeSub === plan.key }"
         >
           <!-- Featured Header Badges -->
-          <template v-if="plan.key === 'basic'">
-            <div class="badge-tag tag-popular">MOST POPULAR</div>
-            <div class="badge-tag tag-your-plan" v-if="userPlan === 'basic'">Your Plan</div>
-          </template>
+          <div class="badge-tag tag-popular" v-if="plan.isPopular">MOST POPULAR</div>
+          <div class="badge-tag tag-your-plan" v-if="activeSub === plan.key">Your Plan</div>
 
           <div class="card-body">
             <div>
@@ -408,10 +521,10 @@ const plans = computed(() => [
             <!-- Action Button -->
             <button 
               class="action-btn"
-              :class="[plan.buttonClass, { 'btn-subscribed': userPlan === plan.key }]"
+              :class="[plan.buttonClass, { 'btn-subscribed': activeSub === plan.key }]"
               @click="selectPlan(plan.key, plan.title)"
             >
-              <template v-if="userPlan === plan.key">
+              <template v-if="activeSub === plan.key">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
                   <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
@@ -485,21 +598,20 @@ const plans = computed(() => [
 </template>
 
 <style scoped>
-/* Main Page Setup - Strictly Non-scrollable Full-screen Layout */
+/* Main Page Setup - Fully Scrollable Responsive Layout */
 .plan-page {
-  height: 100vh;
-  max-height: 100vh;
-  width: 100vw;
-  max-width: 100vw;
+  min-height: 100vh;
+  width: 100%;
   background: linear-gradient(180deg, #f0f6ff 0%, #f7fafc 45%, #e8f2fe 100%);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: #1e293b;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   box-sizing: border-box;
+  padding-bottom: 24px;
 }
 
 /* Background elements */
@@ -602,15 +714,13 @@ const plans = computed(() => [
   z-index: 10;
   max-width: 1180px;
   margin: 0 auto;
-  padding: 0 24px 8px;
+  padding: 0 24px 16px;
   width: 100%;
   box-sizing: border-box;
   flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Title Section */
@@ -749,23 +859,7 @@ const plans = computed(() => [
   overflow: visible;
 }
 
-@keyframes iconSpin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.plan-card:hover .plan-icon-box svg,
-.plan-icon-box:hover svg {
-  animation: iconSpin 3.5s linear infinite;
-}
-
-.header-brand:hover .brand-logo-img {
-  animation: iconSpin 4s linear infinite;
-}
+/* Static Plan Icons */
 
 .plan-icon-box {
   width: 44px;
@@ -832,12 +926,11 @@ const plans = computed(() => [
 .features-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 16px;
+  margin: 0 0 20px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   flex: 1;
-  overflow-y: auto;
 }
 
 .feature-item {
@@ -850,16 +943,17 @@ const plans = computed(() => [
 }
 
 .check-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #1d6bf3;
+  background: #10b981;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   margin-top: 1px;
+  box-shadow: 0 1.5px 4px rgba(16, 185, 129, 0.35);
 }
 
 .feature-text {

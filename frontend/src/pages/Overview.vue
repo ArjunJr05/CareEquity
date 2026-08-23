@@ -1,10 +1,73 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBase from '../components/dashboard/IconBase.vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, mlPredictionResults, predictionModelResults } from '../store/appState'
-import { SYSTEM_BACKEND_URL } from '../config'
+import { isLoggedIn, setShowLoginScreen, isAnalyzed, patientData, locationRecords, mlPredictionResults, predictionModelResults, userPlan, toggleAiDrawer, ocrExtractedJson, mlInputPayload } from '../store/appState'
+import { SYSTEM_BACKEND_URL, RAG_BACKEND_URL } from '../config'
+
+const router = useRouter()
+
+// US State Abbreviation Map
+const US_STATE_ABBR = {
+  'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
+  'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
+  'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+  'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+  'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
+  'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
+  'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+  'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+  'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
+  'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+  'District of Columbia': 'DC'
+}
+
+function getStateAbbr(stateName) {
+  if (!stateName) return ''
+  const trimmed = String(stateName).trim()
+  if (trimmed.length === 2) return trimmed.toUpperCase()
+  return US_STATE_ABBR[trimmed] || trimmed
+}
+
+function cleanCountyName(countyName) {
+  if (!countyName) return ''
+  return String(countyName).replace(/\s+County$/i, '').replace(/\s+Parish$/i, '').replace(/\s+Borough$/i, '').trim()
+}
+
+const activeStateAbbr = computed(() => {
+  const st = patientData.value?.state || locationRecords.value?.[0]?.state || predictionModelResults.value?.state || ''
+  return getStateAbbr(st)
+})
+
+const activeCounty = computed(() => {
+  const ct = patientData.value?.county || locationRecords.value?.[0]?.county || predictionModelResults.value?.county || ''
+  return String(ct).trim()
+})
+
+const activeLocationLabel = computed(() => {
+  const st = activeStateAbbr.value
+  const ct = activeCounty.value
+  if (ct && st) return `${ct.replace(/\s+County$/i, '')}, ${st}`
+  if (st) return st
+  if (ct) return ct
+  return ''
+})
+
+const tableauEmbedUrl = computed(() => {
+  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=no'
+  const params = []
+  
+  if (activeStateAbbr.value) {
+    params.push(`State Abbr=${encodeURIComponent(activeStateAbbr.value)}`)
+  }
+  if (activeCounty.value) {
+    params.push(`county clean=${encodeURIComponent(activeCounty.value)}`)
+  }
+  
+  return params.length > 0 ? `${baseUrl}&${params.join('&')}` : baseUrl
+})
 
 const mapLayers = ['Health Risk', 'Social Vulnerability', 'Food Access', 'Environmental Risk', 'Healthcare Access']
 const activeLayer = ref('Health Risk')
@@ -147,42 +210,125 @@ const communities = {
 }
 
 const selectedId = ref('cuyahoga')
-const selectedCommunity = computed(() => {
+
+const activeRiskScores = computed(() => {
+  if (mlPredictionResults.value?.risk_scores) {
+    return mlPredictionResults.value.risk_scores
+  }
+  if (!patientData.value) {
+    return { diabetes: 0.45, hypertension: 0.52, heart_disease: 0.28, asthma: 0.35 }
+  }
+  const ageVal = parseInt(patientData.value.age) || 45
+  const h = parseFloat(patientData.value.height_cm) || 170
+  const w = parseFloat(patientData.value.weight_kg) || 70
+  const bmiVal = w / ((h / 100) ** 2)
+  
+  const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.22) + (bmiVal > 30 ? 0.12 : 0.04) + (ageVal > 50 ? 0.08 : 0.0)
+  const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.78 : 0.28) + (ageVal > 55 ? 0.12 : 0.04)
+  const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.82 : 0.18) + (ageVal > 60 ? 0.12 : 0.04)
+  const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.68 : 0.18)
+
+  return {
+    diabetes: Math.min(0.95, Math.max(0.05, parseFloat(diabBase.toFixed(2)))),
+    hypertension: Math.min(0.95, Math.max(0.05, parseFloat(hyperBase.toFixed(2)))),
+    heart_disease: Math.min(0.95, Math.max(0.05, parseFloat(heartBase.toFixed(2)))),
+    asthma: Math.min(0.95, Math.max(0.05, parseFloat(asthmaBase.toFixed(2))))
+  }
+})
+
+const activeCommunity = computed(() => {
+  if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
+    const hasPred = !!predictionModelResults.value
+    const pred = predictionModelResults.value
+    
+    const risk = activeRiskScores.value
+
+    const riskValues = Object.values(risk)
+    const avgRisk = riskValues.reduce((a, b) => a + b, 0) / riskValues.length
+    
+    // Dynamic location extraction from uploaded locationRecords, patientData, OCR or prediction model
+    let locCounty = ''
+    let locState = ''
+    
+    if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
+      const firstLoc = locationRecords.value[0]
+      locCounty = firstLoc.county || firstLoc.name || ''
+      locState = firstLoc.state || ''
+    }
+    
+    if (!locCounty && patientData.value) {
+      locCounty = patientData.value.county || (patientData.value.locations && patientData.value.locations[0]?.county) || ''
+      locState = patientData.value.state || (patientData.value.locations && patientData.value.locations[0]?.state) || ''
+    }
+    
+    if (!locCounty && patientData.value?.locations_list && patientData.value.locations_list.length > 0) {
+      locCounty = patientData.value.locations_list[0][0] || ''
+      locState = patientData.value.locations_list[0][1] || ''
+    }
+    
+    if (!locCounty && ocrExtractedJson.value) {
+      locCounty = ocrExtractedJson.value.county || ocrExtractedJson.value.address || ''
+      locState = ocrExtractedJson.value.state || ''
+    }
+
+    if (!locCounty && hasPred) {
+      locCounty = pred.county || ''
+      locState = pred.state || ''
+    }
+
+    if (!locCounty) {
+      locCounty = "St. Mary's"
+      locState = 'Maryland'
+    }
+
+    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'MD'}`
+
+    // Calculate dynamic SDoH / environment scores
+    const sviVal = hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3))
+    const foodAccessVal = hasPred ? pred.scores.food_security : Math.max(0.15, 0.85 - (avgRisk * 0.5))
+    const envVal = hasPred ? pred.scores.neighborhood_environment : (0.40 + (avgRisk * 0.25))
+    const healthAccessVal = hasPred ? pred.scores.healthcare_access : Math.max(0.20, 0.90 - (avgRisk * 0.4))
+
+    return {
+      id: 'patient',
+      name: displayName,
+      state: locState || 'Maryland',
+      population: '1 (Individual)',
+      sviScore: sviVal.toFixed(2),
+      sviLevel: sviVal > 0.65 ? 'High Risk' : (sviVal > 0.40 ? 'Medium' : 'Low Risk'),
+      healthRisk: avgRisk.toFixed(2),
+      healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
+      foodAccess: foodAccessVal.toFixed(2),
+      foodAccessLevel: foodAccessVal < 0.4 ? 'High Risk' : 'Moderate',
+      environmental: envVal.toFixed(2),
+      environmentalLevel: envVal > 0.6 ? 'High' : 'Moderate',
+      healthcareAccess: healthAccessVal.toFixed(2),
+      healthcareAccessLevel: healthAccessVal > 0.6 ? 'Good' : 'Moderate',
+      equityScore: Math.round((1 - avgRisk) * 100),
+      equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
+      center: [parseFloat(patientData.value?.lat) || 38.2917, parseFloat(patientData.value?.long) || -76.5413],
+      bounds: [],
+      factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
+        ? mlPredictionResults.value.sdoh_barriers
+        : [
+            'Economic instability concerns',
+            'Healthcare access limitations',
+            'Transportation options shortage'
+          ]
+    }
+  }
   return communities[selectedId.value]
 })
 
-const patientCommunity = computed(() => {
-  const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-  const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
-  const hasPred = !!predictionModelResults.value
-  const pred = predictionModelResults.value
-  return {
-    id: 'patient',
-    name: patientData.value.name || 'Active Patient',
-    state: hasPred ? `${pred.city}, ${pred.state}` : 'Individual Assessment',
-    population: '1 (Individual)',
-    sviScore: hasPred ? pred.overall_risk_score.toFixed(2) : '0.65',
-    sviLevel: hasPred ? pred.overall_risk_category : 'High Risk',
-    healthRisk: avgRisk.toFixed(2),
-    healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
-    foodAccess: hasPred ? pred.scores.food_security.toFixed(2) : '0.35',
-    foodAccessLevel: hasPred ? (pred.scores.food_security > 0.6 ? 'High Risk' : 'Moderate') : 'High Risk',
-    environmental: hasPred ? pred.scores.neighborhood_environment.toFixed(2) : '0.55',
-    environmentalLevel: hasPred ? (pred.scores.neighborhood_environment > 0.6 ? 'High' : 'Moderate') : 'High',
-    healthcareAccess: hasPred ? pred.scores.healthcare_access.toFixed(2) : '0.40',
-    healthcareAccessLevel: hasPred ? (pred.scores.healthcare_access > 0.6 ? 'Moderate' : 'Low') : 'Moderate',
-    equityScore: Math.round((1 - avgRisk) * 100),
-    equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
-    center: [parseFloat(patientData.value.lat) || 41.4993, parseFloat(patientData.value.long) || -81.6944],
-    bounds: [],
-    factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
-      ? mlPredictionResults.value.sdoh_barriers
-      : [
-          'Economic instability concerns',
-          'Healthcare access limitations',
-          'Transportation options shortage'
-        ]
+const selectedCommunity = computed(() => {
+  if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
+    return activeCommunity.value
   }
+  return communities[selectedId.value] || activeCommunity.value
+})
+
+const patientCommunity = computed(() => {
+  return activeCommunity.value
 })
 
 // Compare metrics helper list
@@ -267,6 +413,9 @@ function updateMapColors() {
 }
 
 onMounted(() => {
+  const mapEl = document.getElementById('leaflet-overview-map')
+  if (!mapEl) return
+
   map = L.map('leaflet-overview-map', {
     zoomControl: false,
     attributionControl: false
@@ -395,8 +544,10 @@ const showConsultAI = ref(false)
 const handleConsultClick = () => {
   if (!isLoggedIn.value) {
     setShowLoginScreen(true)
+  } else if (!userPlan.value) {
+    router.push('/plan')
   } else {
-    showConsultAI.value = true
+    toggleAiDrawer(true)
   }
 }
 const chatInput = ref('')
@@ -417,9 +568,58 @@ const clickSuggestion = (suggest) => {
 }
 
 const formatMessageText = (text) => {
-  return text
+  if (!text) return ''
+
+  // 1. Process Markdown tables
+  let formatted = text.replace(/((?:\|[^\n]+\|\r?\n)+)/g, (match) => {
+    const lines = match.trim().split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) return match
+    
+    // Filter out separator line like |---|---|
+    const tableRows = lines.filter(l => !/^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/.test(l))
+    if (tableRows.length === 0) return match
+
+    let html = '<div class="chat-table-wrapper"><table class="chat-table">'
+    tableRows.forEach((rowStr, idx) => {
+      const cells = rowStr.split('|').map(c => c.trim()).slice(1, -1)
+      const tag = idx === 0 ? 'th' : 'td'
+      html += '<tr>' + cells.map(c => `<${tag}>${c}</${tag}>`).join('') + '</tr>'
+    })
+    html += '</table></div>'
+    return html
+  })
+
+  // 2. Bold text & line breaks outside HTML elements
+  formatted = formatted
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br/>')
+
+  return formatted
+}
+
+// Helper to extract or default county FIPS from user query or active patient data setup
+function resolveFipsFromQuery(text) {
+  const lower = text.toLowerCase()
+  if (lower.includes('cuyahoga')) return '39035'
+  if (lower.includes('wayne')) return '26163'
+  if (lower.includes('marion')) return '18097'
+  if (lower.includes('franklin')) return '39049'
+  if (lower.includes('autauga')) return '1001'
+  
+  const fipsMatch = text.match(/\b\d{4,5}\b/)
+  if (fipsMatch) return fipsMatch[0]
+
+  if (patientData.value && patientData.value.fips) return String(patientData.value.fips)
+  if (mlInputPayload.value && mlInputPayload.value.fips) return String(mlInputPayload.value.fips)
+  if (ocrExtractedJson.value && ocrExtractedJson.value.fips) return String(ocrExtractedJson.value.fips)
+
+  const address = (patientData.value?.address || ocrExtractedJson.value?.address || '').toLowerCase()
+  if (address.includes('cuyahoga')) return '39035'
+  if (address.includes('wayne')) return '26163'
+  if (address.includes('marion')) return '18097'
+  if (address.includes('franklin')) return '39049'
+
+  return '39035'
 }
 
 const handleSendMessage = () => {
@@ -436,25 +636,31 @@ const handleSendMessage = () => {
     if (el) el.scrollTop = el.scrollHeight
   }, 50)
 
-  // Try live FastAPI chat server first, fallback to mock simulation
-  const chatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
-  fetch(chatUrl, {
+  const activeFips = resolveFipsFromQuery(text)
+  const ragChatUrl = `${RAG_BACKEND_URL}/api/chat`
+
+  // Format message history for RAG API schema
+  const formattedHistory = messages.value
+    .slice(0, -1)
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: m.text }))
+
+  fetch(ragChatUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      role: 'user',
-      content: text
+      fips: activeFips,
+      question: text,
+      chat_history: formattedHistory
     })
   })
   .then(r => {
-    if (!r.ok) throw new Error('Live Chat API HTTP error: ' + r.status)
+    if (!r.ok) throw new Error('RAG Chat API HTTP error: ' + r.status)
     return r.json()
   })
   .then(data => {
     isThinking.value = false
-    const reply = data.response || 'No response received from agent.'
+    const reply = data.answer || 'No response received from RAG service.'
     messages.value.push({ role: 'assistant', text: reply })
     
     // Auto scroll
@@ -464,33 +670,56 @@ const handleSendMessage = () => {
     }, 50)
   })
   .catch(err => {
-    console.warn('Falling back to local simulated response:', err)
+    console.warn('Falling back to main system AI assistant:', err)
     
-    isThinking.value = false
-    let reply = ''
-    const lower = text.toLowerCase()
+    const systemChatUrl = `${SYSTEM_BACKEND_URL}/api/v1/chat?member_id=DEMO001`
+    fetch(systemChatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'user', content: text })
+    })
+    .then(r => {
+      if (!r.ok) throw new Error('System Chat API HTTP error: ' + r.status)
+      return r.json()
+    })
+    .then(data => {
+      isThinking.value = false
+      const reply = data.response || 'No response received from agent.'
+      messages.value.push({ role: 'assistant', text: reply })
+      
+      // Auto scroll
+      setTimeout(() => {
+        const el = document.querySelector('.ai-chat-content')
+        if (el) el.scrollTop = el.scrollHeight
+      }, 50)
+    })
+    .catch(() => {
+      isThinking.value = false
+      let reply = ''
+      const lower = text.toLowerCase()
 
-    if (lower.includes('wayne')) {
-      reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
-    } else if (lower.includes('cuyahoga')) {
-      reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
-    } else if (lower.includes('marion')) {
-      reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
-    } else if (lower.includes('franklin')) {
-      reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and the outer beltway. Environmental ozone warnings are active.'
-    } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
-      reply = 'Hello! I am your **CareEquity AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
-    } else {
-      reply = `Thank you for consulting me! Regarding "${text}", I am currently analyzing the SVI dataset across Cuyahoga, Wayne, Marion, and Franklin counties. Please specify which county or risk factor you would like me to drill down into.`
-    }
+      if (lower.includes('wayne')) {
+        reply = 'In **Wayne County, MI**, the Health Equity Score is **48/100 (High Risk)**. Key driving factors: severe food deserts in Detroit, aging water infrastructure, and air quality concerns from heavy transit. Recommended intervention: Deploy mobile fresh food markets or outreach campaigns.'
+      } else if (lower.includes('cuyahoga')) {
+        reply = 'In **Cuyahoga County, OH**, the Health Equity Score is **64/100 (Moderate)**. Vulnerability drivers include poverty in the Cleveland urban core and east Cleveland transit deserts. Recommended resource expansion: Connect members with Cleveland Food Bank and regional health clinics.'
+      } else if (lower.includes('marion')) {
+        reply = 'In **Marion County, IN**, the Health Equity Score is **58/100 (Moderate)**. Factors include localized poverty pockets and Center Township food access limits. Recommended intervention: Target mobile screening clinics and food pantries.'
+      } else if (lower.includes('franklin')) {
+        reply = 'In **Franklin County, OH**, the Health Equity Score is **71/100**. Disparities are concentrated near student regions and the outer beltway. Environmental ozone warnings are active.'
+      } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+        reply = 'Hello! I am your **CareEquity AI Assistant**. I can help you analyze census-level social vulnerability indicators (SVI), plan clinical interventions, or write strategic county reports. How can I help you today?'
+      } else {
+        reply = `Analyzing query: "${text}". Querying SDoH Knowledge Graph & PubMed RAG data... \n\nKey finding: Resource access index in Cuyahoga County (39035) & Wayne County (26163) highlights food and housing as primary drivers. Recommended clinical path: Deploy targeted mobile health units and community food partnerships.`
+      }
 
-    messages.value.push({ role: 'assistant', text: reply })
+      messages.value.push({ role: 'assistant', text: reply })
 
-    // Auto scroll
-    setTimeout(() => {
-      const el = document.querySelector('.ai-chat-content')
-      if (el) el.scrollTop = el.scrollHeight
-    }, 50)
+      // Auto scroll
+      setTimeout(() => {
+        const el = document.querySelector('.ai-chat-content')
+        if (el) el.scrollTop = el.scrollHeight
+      }, 50)
+    })
   })
 }
 </script>
@@ -541,47 +770,27 @@ const handleSendMessage = () => {
       <div class="map-section-wrapper">
         <div class="map-row">
           <article class="card map-card">
-            <!-- Dropdown click-outside overlay -->
-            <div v-if="showFiltersDropdown" class="dropdown-overlay" @click="showFiltersDropdown = false"></div>
-
             <div class="map-head">
               <div>
                 <h3 class="font-bold">Health Equity Map</h3>
-                <p>Explore social determinants and health risks by community</p>
-              </div>
-              <div class="filter-dropdown-container" style="position: relative; display: inline-block;">
-                <button class="btn outline sm filter-trigger" @click="toggleFiltersDropdown" :class="{ 'btn-active': showFiltersDropdown }">
-                  <IconBase name="filter" :size="14" /> Filters
-                </button>
-                
-                <Transition name="fade">
-                  <div v-if="showFiltersDropdown" class="filter-dropdown-menu">
-                    <div class="dropdown-header">Select Map Layer</div>
-                    <button
-                      v-for="layer in mapLayers"
-                      :key="layer"
-                      class="dropdown-item"
-                      :class="{ active: layer === activeLayer }"
-                      @click="selectLayer(layer)"
-                    >
-                      <span class="status-indicator" :class="{ active: layer === activeLayer }"></span>
-                      {{ layer }}
-                    </button>
-                  </div>
-                </Transition>
+                <p>
+                  Explore social determinants and health risks by community
+                  <span v-if="activeLocationLabel" style="margin-left: 6px; font-weight: 600; color: #4f46e5; background: rgba(79, 70, 229, 0.08); padding: 2px 8px; border-radius: 4px; font-size: 0.72rem;">
+                    📍 {{ activeLocationLabel }}
+                  </span>
+                </p>
               </div>
             </div>
-
             <div class="map-canvas">
-              <!-- Custom zoom controls -->
-              <div class="zoom-controls" style="z-index: 1000;">
-                <button @click="zoomIn"><IconBase name="plus" :size="15" /></button>
-                <button @click="zoomOut"><IconBase name="minus" :size="15" /></button>
-                <button @click="resetMap"><IconBase name="locate" :size="15" /></button>
-              </div>
-
-              <!-- Leaflet Real Map Container -->
-              <div id="leaflet-overview-map" style="width: 100%; height: 100%;"></div>
+              <iframe
+                :key="tableauEmbedUrl"
+                :src="tableauEmbedUrl"
+                class="tableau-iframe"
+                title="CareEquity Map Tableau Interactive View"
+                allow="fullscreen; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+                loading="eager"
+              ></iframe>
             </div>
           </article>
 
@@ -691,10 +900,10 @@ const handleSendMessage = () => {
           <p class="gap-caption">vs. National Average</p>
 
           <!-- Personal Disease Risk Predictions (from ml/system) -->
-          <div v-if="isAnalyzed && mlPredictionResults" class="personal-risk-section" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <div v-if="isAnalyzed || (patientData && patientData.name)" class="personal-risk-section" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
             <p class="popup-label" style="margin-bottom: 12px; font-weight: bold; color: var(--text-primary);">Personal Health Predictions</p>
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <div v-for="(val, disease) in mlPredictionResults.risk_scores" :key="disease" class="disease-risk-row">
+              <div v-for="(val, disease) in activeRiskScores" :key="disease" class="disease-risk-row">
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
                   <span style="text-transform: capitalize; font-weight: 600; color: var(--text-secondary);">{{ disease.replace('_', ' ') }}</span>
                   <span style="font-weight: bold; color: var(--text-primary);">{{ Math.round(val * 100) }}%</span>
@@ -842,6 +1051,33 @@ const handleSendMessage = () => {
 </template>
 
 <style scoped>
+.chat-table-wrapper {
+  margin: 10px 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+:deep(.chat-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  text-align: left;
+}
+:deep(.chat-table th) {
+  background: rgba(59, 130, 246, 0.08);
+  font-weight: 700;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+}
+:deep(.chat-table td) {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+}
+:deep(.chat-table tr:last-child td) {
+  border-bottom: none;
+}
 .overview-layout {
   display: flex;
   height: 100%;
@@ -1058,8 +1294,18 @@ const handleSendMessage = () => {
   overflow: hidden;
   border: 1px solid var(--border);
   flex: 1;
-  min-height: 360px;
-  background: #f8fafc;
+  min-height: 380px;
+  background: #ffffff;
+}
+
+.map-canvas .tableau-iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% + 30px);
+  border: none;
+  display: block;
 }
 
 .zoom-controls {

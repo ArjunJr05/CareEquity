@@ -92,6 +92,25 @@ const radiusOptionsList = ['5 miles', '10 miles', '25 miles', '50 miles']
 const selectRadius = (val) => {
   radiusFilter.value = val
   isRadiusDropdownOpen.value = false
+  triggerToast(`Filtered resources within ${val}`)
+
+  nextTick(() => {
+    renderMapElements()
+    if (mapInstance) {
+      const maxMiles = parseFloat(val) || 25
+      let targetZoom = 12.5
+      if (maxMiles <= 5) targetZoom = 13.0
+      else if (maxMiles <= 10) targetZoom = 11.8
+      else if (maxMiles <= 25) targetZoom = 10.2
+      else targetZoom = 8.8
+
+      mapInstance.flyTo({
+        center: [mapCenter.value.lng, mapCenter.value.lat],
+        zoom: targetZoom,
+        speed: 1.2
+      })
+    }
+  })
 }
 
 const isRegionDropdownOpen = ref(false)
@@ -218,355 +237,611 @@ function toggleBookmark(id) {
   }
 }
 
+// Exact Haversine Distance Calculator (Miles)
+function getHaversineDistanceMiles(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 1.0
+  const R = 3958.8 // Earth radius in miles
+  const dLat = (lat2 - lat1) * (Math.PI / 180)
+  const dLon = (lon2 - lon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return parseFloat((R * c).toFixed(1))
+}
+
+// Multi-Tier Resource Generator across 5mi, 10mi, 25mi, and 50mi zones
+function buildTieredCommunityResources(cityName, centerLat, centerLng, prefix = 'res') {
+  const rad = centerLat * (Math.PI / 180)
+  const cosLat = Math.cos(rad) || 0.75
+
+  const offsetCoord = (distMiles, angleDeg) => {
+    const angleRad = angleDeg * (Math.PI / 180)
+    const dLat = (distMiles / 69.0) * Math.cos(angleRad)
+    const dLon = (distMiles / (69.0 * cosLat)) * Math.sin(angleRad)
+    return {
+      lat: parseFloat((centerLat + dLat).toFixed(4)),
+      lon: parseFloat((centerLng + dLon).toFixed(4))
+    }
+  }
+
+  const list = [
+    // ── ZONE 1: Within 5 Miles (Downtown & Immediate Neighborhoods) ──
+    {
+      id: `${prefix}-camp-1`,
+      name: `Free Mobile Health & SDOH Screening Truck`,
+      category: 'campaign',
+      categoryLabel: 'Live Campaign',
+      verified: true,
+      isCampaign: true,
+      rating: 5.0,
+      reviewsCount: 48,
+      services: ['Blood pressure check', 'Glucose screening', 'SDOH Navigation', 'SNAP Signup'],
+      hoursText: 'Today: 9:00 AM - 4:00 PM',
+      eligibility: `Open to all ${cityName} residents. No insurance needed.`,
+      address: `Downtown Civic Plaza, ${cityName}`,
+      phone: '(555) 019-2831',
+      website: 'careequity.org/mobile',
+      ...offsetCoord(1.2, 45),
+      about: 'Urgent mobile healthcare screening truck offering free vitals check, diabetes risk evaluation, and direct referral to social services.'
+    },
+    {
+      id: `${prefix}-food-1`,
+      name: `Greater Community Food Bank & Nutrition Hub`,
+      category: 'food',
+      categoryLabel: 'Food Assistance',
+      verified: true,
+      rating: 4.8,
+      reviewsCount: 124,
+      services: ['Emergency food pantry', 'SNAP assistance', 'Senior grocery boxes', 'Produce market'],
+      hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
+      eligibility: 'All families in need. No proof of income required.',
+      address: `1200 Center St, ${cityName}`,
+      phone: '(555) 738-2067',
+      website: 'communityfoodbank.org',
+      ...offsetCoord(2.3, 110),
+      about: 'Provides emergency food boxes, fresh vegetables, and SNAP enrollment support to eliminate food insecurity.'
+    },
+    {
+      id: `${prefix}-health-1`,
+      name: `${cityName} Primary Health Center`,
+      category: 'health',
+      categoryLabel: 'Healthcare Clinic',
+      verified: true,
+      rating: 4.6,
+      reviewsCount: 92,
+      services: ['Primary care', 'Chronic disease mgmt', 'Sliding-scale pharmacy', 'Pediatrics'],
+      hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
+      eligibility: 'Uninsured & Medicaid accepted. Sliding fee scale.',
+      address: `2500 Main Ave, ${cityName}`,
+      phone: '(555) 778-7800',
+      website: 'healthcenter.org',
+      ...offsetCoord(3.1, 200),
+      about: 'Comprehensive community health clinic offering primary medicine, preventive exams, and sliding-scale pharmacy aid.'
+    },
+    {
+      id: `${prefix}-mental-1`,
+      name: `Neighborhood Family Behavioral & Mental Health`,
+      category: 'mental',
+      categoryLabel: 'Mental Health',
+      verified: true,
+      rating: 4.5,
+      reviewsCount: 76,
+      services: ['Counseling', 'Psychiatry', 'Substance recovery support', 'Youth therapy'],
+      hoursText: 'Mon - Fri: 9:00 AM - 6:00 PM',
+      eligibility: 'All residents. Medicaid, Medicare & self-pay.',
+      address: `1160 Clifton Blvd, ${cityName}`,
+      phone: '(555) 281-2400',
+      website: 'familybehavioral.org',
+      ...offsetCoord(3.4, 280),
+      about: 'Compassionate behavioral health agency providing individual counseling, substance treatment, and crisis intervention.'
+    },
+    {
+      id: `${prefix}-transit-1`,
+      name: `City Transit Mobility & Medical Transit Center`,
+      category: 'transit',
+      categoryLabel: 'Transportation',
+      verified: true,
+      rating: 4.2,
+      reviewsCount: 64,
+      services: ['Free medical transit passes', 'Paratransit service', 'Subsidized bus cards'],
+      hoursText: 'Mon - Sun: 6:00 AM - 8:00 PM',
+      eligibility: 'Low-income individuals, disabled & seniors qualify for free transit.',
+      address: `400 Transit Way, ${cityName}`,
+      phone: '(555) 621-9500',
+      website: 'citytransit.gov',
+      ...offsetCoord(1.8, 330),
+      about: 'Subsidized transportation center ensuring patients never miss essential healthcare appointments due to transit barriers.'
+    },
+    {
+      id: `${prefix}-housing-1`,
+      name: `Community Housing Action & Utility Relief`,
+      category: 'housing',
+      categoryLabel: 'Housing & Utilities',
+      verified: false,
+      rating: 4.3,
+      reviewsCount: 88,
+      services: ['Utility bill assistance', 'Emergency rent relief', 'Tenant rights advocacy'],
+      hoursText: 'Mon - Fri: 8:30 AM - 5:00 PM',
+      eligibility: 'Low-to-moderate income households.',
+      address: `850 Commerce Ave, ${cityName}`,
+      phone: '(555) 574-7100',
+      website: 'housingaction.org',
+      ...offsetCoord(4.2, 85),
+      about: 'Helps families maintain safe, affordable housing and provides emergency utility grant assistance.'
+    },
+    {
+      id: `${prefix}-social-1`,
+      name: `Step Forward Family & Social Empowerment Services`,
+      category: 'social',
+      categoryLabel: 'Social Services',
+      verified: true,
+      rating: 4.7,
+      reviewsCount: 51,
+      services: ['Cash assistance', 'Job training', 'Childcare vouchers', 'Emergency aid'],
+      hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
+      eligibility: 'Income-eligible families.',
+      address: `1800 Superior Ave, ${cityName}`,
+      phone: '(555) 696-9077',
+      website: 'stepforward.org',
+      ...offsetCoord(2.9, 60),
+      about: 'Community Action Agency fighting poverty by providing family support services and career development.'
+    },
+    {
+      id: `${prefix}-gym-1`,
+      name: `YMCA Community Wellness & Fitness Center`,
+      category: 'gym',
+      categoryLabel: 'Fitness & Wellness',
+      verified: true,
+      rating: 4.7,
+      reviewsCount: 110,
+      services: ['Subsidized fitness memberships', 'Diabetes prevention classes', 'Youth sports'],
+      hoursText: 'Mon - Fri: 5:30 AM - 9:00 PM',
+      eligibility: 'Financial aid available based on income.',
+      address: `2200 Prospect Ave, ${cityName}`,
+      phone: '(555) 344-7700',
+      website: 'communityymca.org',
+      ...offsetCoord(1.5, 160),
+      about: 'Promotes cardiovascular wellness and chronic disease prevention through guided fitness and youth wellness.'
+    },
+    {
+      id: `${prefix}-park-1`,
+      name: `Lakeview Memorial Community Green Park`,
+      category: 'park',
+      categoryLabel: 'Parks & Open Space',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 340,
+      services: ['Paved walking trails', 'Outdoor exercise stations', 'Children playground'],
+      hoursText: 'Daily: 6:00 AM - 10:00 PM',
+      eligibility: 'Free public park.',
+      address: `6500 Shoreway Blvd, ${cityName}`,
+      phone: '(555) 635-3200',
+      website: 'cityparks.gov',
+      ...offsetCoord(3.8, 305),
+      about: 'Expansive public park with green walking loops and fitness installations to foster active, healthy living.'
+    },
+
+    // ── ZONE 2: 5.1 to 10 Miles (Suburban & District Resources) ──
+    {
+      id: `${prefix}-food-zone2`,
+      name: `Suburban Hope Pantry & Mobile Fresh Market`,
+      category: 'food',
+      categoryLabel: 'Food Assistance',
+      verified: true,
+      rating: 4.7,
+      reviewsCount: 89,
+      services: ['Drive-through pantry', 'Diaper bank', 'Produce distributions'],
+      hoursText: 'Tue & Thu: 9:00 AM - 3:00 PM',
+      eligibility: 'Open to all district residents.',
+      address: `4410 Westway Pkwy, ${cityName} Suburbs`,
+      phone: '(555) 882-1414',
+      website: 'hopepantry.org',
+      ...offsetCoord(6.8, 250),
+      about: 'High-capacity suburban pantry distributing farm-fresh dairy, produce, and baby formula.'
+    },
+    {
+      id: `${prefix}-health-zone2`,
+      name: `MetroHealth Suburban Ambulatory Pavilion`,
+      category: 'health',
+      categoryLabel: 'Healthcare Clinic',
+      verified: true,
+      rating: 4.6,
+      reviewsCount: 145,
+      services: ['Specialist referrals', 'Dental clinic', 'Vision exams', 'Walk-in urgent care'],
+      hoursText: 'Mon - Sat: 8:00 AM - 7:00 PM',
+      eligibility: 'Sliding fee scale available for uninsured.',
+      address: `7820 Ridge Rd, ${cityName} South`,
+      phone: '(555) 910-3300',
+      website: 'metrohealth.org/pavilion',
+      ...offsetCoord(7.5, 185),
+      about: 'Modern multi-specialty healthcare campus providing dental, optometry, and chronic care management.'
+    },
+    {
+      id: `${prefix}-mental-zone2`,
+      name: `Pathways Recovery & Adolescent Counseling Center`,
+      category: 'mental',
+      categoryLabel: 'Mental Health',
+      verified: true,
+      rating: 4.8,
+      reviewsCount: 62,
+      services: ['Intensive outpatient', 'Youth depression support', 'Family mediation'],
+      hoursText: 'Mon - Fri: 8:00 AM - 6:00 PM',
+      eligibility: 'Accepts Medicaid, Medicare & private insurance.',
+      address: `3310 Eastland Blvd, ${cityName} East`,
+      phone: '(555) 441-9922',
+      website: 'pathwaysrecovery.org',
+      ...offsetCoord(8.2, 70),
+      about: 'Specialized youth and adult outpatient clinic focused on mental resiliency and holistic recovery.'
+    },
+    {
+      id: `${prefix}-housing-zone2`,
+      name: `Regional Homelessness Prevention & Rapid Rehousing`,
+      category: 'housing',
+      categoryLabel: 'Housing & Utilities',
+      verified: true,
+      rating: 4.4,
+      reviewsCount: 57,
+      services: ['Bridge housing', 'Security deposit grants', 'Eviction defense'],
+      hoursText: 'Mon - Fri: 9:00 AM - 5:00 PM',
+      eligibility: 'Individuals at immediate risk of homelessness.',
+      address: `5120 Northway Dr, ${cityName}`,
+      phone: '(555) 773-4001',
+      website: 'rehousingnetwork.org',
+      ...offsetCoord(9.1, 350),
+      about: 'Coordinates transitional shelter and rental deposit grants to stabilize families in permanent homes.'
+    },
+    {
+      id: `${prefix}-social-zone2`,
+      name: `County Job & Family Services Suburban Branch`,
+      category: 'social',
+      categoryLabel: 'Social Services',
+      verified: true,
+      rating: 4.3,
+      reviewsCount: 118,
+      services: ['Medicaid enrollment', 'Cash assistance', 'WIC certification', 'Job matching'],
+      hoursText: 'Mon - Fri: 8:00 AM - 4:30 PM',
+      eligibility: 'County residents qualifying under state thresholds.',
+      address: `6200 Brookpark Rd, ${cityName}`,
+      phone: '(555) 398-8400',
+      website: 'countyjfs.gov',
+      ...offsetCoord(8.7, 215),
+      about: 'County government service branch assisting with Medicaid, food stamps, and employment assistance.'
+    },
+    {
+      id: `${prefix}-gym-zone2`,
+      name: `Premier Community Rec Center & Aquatic Therapy`,
+      category: 'gym',
+      categoryLabel: 'Fitness & Wellness',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 210,
+      services: ['Low-impact water aerobics', 'Senior track', 'Nutrition counseling'],
+      hoursText: 'Mon - Sat: 6:00 AM - 9:00 PM',
+      eligibility: 'Community memberships with income discounts.',
+      address: `8900 Broadview Rd, ${cityName}`,
+      phone: '(555) 526-9000',
+      website: 'communityreccenter.org',
+      ...offsetCoord(7.8, 140),
+      about: 'State-of-the-art recreation center featuring therapy pools and cardio rehabilitation facilities.'
+    },
+    {
+      id: `${prefix}-park-zone2`,
+      name: `Valley Reservation Nature Trails & Fitness Loop`,
+      category: 'park',
+      categoryLabel: 'Parks & Open Space',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 420,
+      services: ['Paved bike trail', 'Nature education center', 'Shaded fitness stations'],
+      hoursText: 'Daily: 6:00 AM - 11:00 PM',
+      eligibility: 'Free public reservation.',
+      address: `10100 Valley Pkwy, ${cityName}`,
+      phone: '(555) 351-6300',
+      website: 'metroparks.org/valley',
+      ...offsetCoord(9.4, 275),
+      about: 'Scenic wooded park system offering miles of accessible trails for physical and mental relaxation.'
+    },
+
+    // ── ZONE 3: 10.1 to 25 Miles (Metropolitan & Tri-County Network) ──
+    {
+      id: `${prefix}-health-zone3`,
+      name: `University Health Medical Center & Trauma Hub`,
+      category: 'health',
+      categoryLabel: 'Healthcare Clinic',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 512,
+      services: ['Cardiovascular center', 'Comprehensive oncology', '24/7 Emergency trauma', 'Charity care'],
+      hoursText: 'Open 24 Hours / 7 Days',
+      eligibility: 'All patients. Financial assistance program available.',
+      address: `11100 Euclid Ave, Metro Campus`,
+      phone: '(555) 844-1000',
+      website: 'universityhealth.org',
+      ...offsetCoord(14.5, 55),
+      about: 'Major tertiary academic medical hospital providing advanced specialist care and indigent healthcare coverage.'
+    },
+    {
+      id: `${prefix}-food-zone3`,
+      name: `Regional Food Bank Logistics & Warehouse Distribution`,
+      category: 'food',
+      categoryLabel: 'Food Assistance',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 310,
+      services: ['Bulk pantry distribution', 'School backpack meals', 'Mobile pantry fleets'],
+      hoursText: 'Mon - Fri: 7:30 AM - 4:30 PM',
+      eligibility: 'Non-profit food distributors and regional families.',
+      address: `15500 Waterloo Rd, Metro East`,
+      phone: '(555) 738-2000',
+      website: 'regionalfoodbank.org',
+      ...offsetCoord(16.8, 80),
+      about: 'Logistics distribution hub providing over 50 million pounds of food annually across 6 counties.'
+    },
+    {
+      id: `${prefix}-mental-zone3`,
+      name: `Metro Comprehensive Behavioral Health Institute`,
+      category: 'mental',
+      categoryLabel: 'Mental Health',
+      verified: true,
+      rating: 4.7,
+      reviewsCount: 160,
+      services: ['24/7 Crisis triage', 'Inpatient psychiatric care', 'Dual-diagnosis recovery'],
+      hoursText: 'Open 24/7 Crisis Line',
+      eligibility: 'Immediate admission for psychiatric crises regardless of insurance.',
+      address: `4500 Metro Dr, North Metro`,
+      phone: '(555) 961-4700',
+      website: 'behavioralhealthinstitute.org',
+      ...offsetCoord(18.2, 310),
+      about: 'Round-the-clock emergency mental health hospital stabilizing acute mental and emotional distress.'
+    },
+    {
+      id: `${prefix}-housing-zone3`,
+      name: `Metropolitan Area Housing Authority Central`,
+      category: 'housing',
+      categoryLabel: 'Housing & Utilities',
+      verified: true,
+      rating: 4.2,
+      reviewsCount: 195,
+      services: ['Section 8 voucher administration', 'Public housing applications', 'Senior subsidized towers'],
+      hoursText: 'Mon - Fri: 8:00 AM - 4:00 PM',
+      eligibility: 'HUD income-qualifying applicants.',
+      address: `1441 W 25th St, Central Metro`,
+      phone: '(555) 344-1300',
+      website: 'metrohousing.org',
+      ...offsetCoord(13.2, 190),
+      about: 'Manages affordable subsidized public housing and vouchers for low-income seniors and families.'
+    },
+    {
+      id: `${prefix}-transit-zone3`,
+      name: `Regional Transit Authority Multi-County Terminal`,
+      category: 'transit',
+      categoryLabel: 'Transportation',
+      verified: true,
+      rating: 4.4,
+      reviewsCount: 88,
+      services: ['Intercity express routes', 'Vanpool matching', 'Medical transit subsidy'],
+      hoursText: 'Daily: 5:00 AM - 11:30 PM',
+      eligibility: 'General public & subsidized commuters.',
+      address: `700 Intercity Blvd, Metro Transit Hub`,
+      phone: '(555) 566-0100',
+      website: 'regionaltransit.gov',
+      ...offsetCoord(21.0, 160),
+      about: 'Connects outlying rural and suburban communities to central medical complexes and employment sectors.'
+    },
+    {
+      id: `${prefix}-social-zone3`,
+      name: `Salvation Army Regional Social Services Center`,
+      category: 'social',
+      categoryLabel: 'Social Services',
+      verified: true,
+      rating: 4.8,
+      reviewsCount: 140,
+      services: ['Emergency disaster assistance', 'Family financial coaching', 'Clothing boutique'],
+      hoursText: 'Mon - Fri: 9:00 AM - 4:30 PM',
+      eligibility: 'Open to all individuals in need.',
+      address: `2507 E 22nd St, Metro Central`,
+      phone: '(555) 619-9111',
+      website: 'salvationarmy.org',
+      ...offsetCoord(15.4, 120),
+      about: 'Emergency social service center offering food, winter coats, utility support, and case management.'
+    },
+    {
+      id: `${prefix}-park-zone3`,
+      name: `Metropolitan Lakefront State Nature Preserve`,
+      category: 'park',
+      categoryLabel: 'Parks & Open Space',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 680,
+      services: ['Lakefront walking trail', 'Public fishing pier', 'Kayaking & outdoor fitness'],
+      hoursText: 'Daily: 6:00 AM - Dusk',
+      eligibility: 'Free public nature preserve.',
+      address: `8700 Lakefront Pkwy, East Coast`,
+      phone: '(555) 881-4600',
+      website: 'stateparks.gov/lakefront',
+      ...offsetCoord(22.8, 35),
+      about: 'Pristine coastal park offering waterfront recreation and ecological walking paths for public wellness.'
+    },
+
+    // ── ZONE 4: 25.1 to 50 Miles (Regional / Multi-County Health Network) ──
+    {
+      id: `${prefix}-health-zone4`,
+      name: `Regional Memorial Health System & Rural Outpatient Clinic`,
+      category: 'health',
+      categoryLabel: 'Healthcare Clinic',
+      verified: true,
+      rating: 4.8,
+      reviewsCount: 230,
+      services: ['Rural primary care', 'Telehealth consultations', 'Preventive screenings', 'Mobile clinic'],
+      hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
+      eligibility: 'Serving rural and regional county residents.',
+      address: `14200 State Route 42, Regional North`,
+      phone: '(555) 832-7700',
+      website: 'regionalmemorial.org',
+      ...offsetCoord(34.5, 15),
+      about: 'Extends medical services into underserved rural and semi-rural areas across adjoining counties.'
+    },
+    {
+      id: `${prefix}-food-zone4`,
+      name: `Agricultural Harvest Network & Tri-County Food Consortium`,
+      category: 'food',
+      categoryLabel: 'Food Assistance',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 175,
+      services: ['Farm-to-family produce boxes', 'Rural pantry delivery', 'Nutritional support'],
+      hoursText: 'Mon - Thu: 8:00 AM - 4:00 PM',
+      eligibility: 'All rural and county families facing food insecurity.',
+      address: `890 Harvest Way, County West`,
+      phone: '(555) 644-2200',
+      website: 'harvestnetwork.org',
+      ...offsetCoord(38.2, 260),
+      about: 'Connects regional farming cooperatives directly with local food pantries to eliminate food deserts.'
+    },
+    {
+      id: `${prefix}-mental-zone4`,
+      name: `Tri-County Behavioral Health & Substance Crisis Campus`,
+      category: 'mental',
+      categoryLabel: 'Mental Health',
+      verified: true,
+      rating: 4.6,
+      reviewsCount: 115,
+      services: ['Residential rehabilitation', 'Medication-assisted treatment', 'Family recovery programs'],
+      hoursText: '24/7 Intake Available',
+      eligibility: 'Open to all tri-county residents. Sliding scale available.',
+      address: `3300 County Line Rd, South Regional`,
+      phone: '(555) 723-9000',
+      website: 'tricountymental.org',
+      ...offsetCoord(42.0, 175),
+      about: 'Regional inpatient and outpatient recovery center serving a three-county area with evidence-based mental care.'
+    },
+    {
+      id: `${prefix}-housing-zone4`,
+      name: `Regional Rural Housing Development Corporation`,
+      category: 'housing',
+      categoryLabel: 'Housing & Utilities',
+      verified: true,
+      rating: 4.5,
+      reviewsCount: 68,
+      services: ['Rural home weatherization', 'USDA housing assistance', 'Emergency roof & furnace repair'],
+      hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
+      eligibility: 'Rural low-income homeowners and renters.',
+      address: `505 Rural Development Rd, County South`,
+      phone: '(555) 438-1120',
+      website: 'ruralhousingdev.org',
+      ...offsetCoord(45.5, 130),
+      about: 'Assists rural families with home rehabilitation grants, energy efficiency, and affordable home ownership.'
+    },
+    {
+      id: `${prefix}-social-zone4`,
+      name: `Community Action Partnership Multi-County Headquarters`,
+      category: 'social',
+      categoryLabel: 'Social Services',
+      verified: true,
+      rating: 4.7,
+      reviewsCount: 94,
+      services: ['Low-income energy assistance (LIHEAP)', 'Early childhood education', 'Financial literacy'],
+      hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
+      eligibility: 'Low-income households across 4 contiguous counties.',
+      address: `1220 County Seat Blvd, Regional Hub`,
+      phone: '(555) 321-7890',
+      website: 'communityactionpartner.org',
+      ...offsetCoord(31.8, 290),
+      about: 'Multi-county non-profit administering critical energy assistance, weatherization, and family stabilization.'
+    },
+    {
+      id: `${prefix}-park-zone4`,
+      name: `State Forest & Wildlife Environmental Wellness Sanctuary`,
+      category: 'park',
+      categoryLabel: 'Parks & Open Space',
+      verified: true,
+      rating: 4.9,
+      reviewsCount: 890,
+      services: ['Hiking & mountain biking trails', 'Campgrounds', 'Forest therapy walking circuits'],
+      hoursText: 'Daily: Sunrise to Sunset',
+      eligibility: 'Free state forest admission.',
+      address: `22000 Forest Sanctuary Rd, State Reserve`,
+      phone: '(555) 987-6543',
+      website: 'stateforests.gov',
+      ...offsetCoord(47.2, 40),
+      about: 'Vast protected state forest providing clean air, wilderness immersion, and restorative outdoor fitness.'
+    }
+  ]
+
+  return list
+}
+
 // Preset Communities Data
 const resourcesData = {
   cuyahoga: {
     cityName: 'Cleveland, OH',
     centerLat: 41.4993,
     centerLng: -81.6944,
-    resources: [
-      {
-        id: 'cuyahoga-campaign-1',
-        name: 'Free Mobile Health & SDOH Screening',
-        category: 'campaign',
-        categoryLabel: 'Live Campaign',
-        verified: true,
-        isCampaign: true,
-        distance: 1.2,
-        rating: 5.0,
-        reviewsCount: 48,
-        services: ['Free blood pressure check', 'Glucose screening', 'SDOH Navigation', 'SNAP Signup'],
-        hoursText: 'Today: 9:00 AM - 4:00 PM',
-        eligibility: 'Open to all Cuyahoga residents. No insurance required.',
-        address: 'Public Square, Cleveland, OH 44113',
-        phone: '(216) 555-0199',
-        website: 'clevelandhealth.gov/mobile',
-        lat: 41.5005,
-        lon: -81.6930,
-        about: 'Urgent mobile healthcare screening truck offering free vitals check, diabetes risk evaluation, and direct referral to social services.'
-      },
-      {
-        id: 'cuyahoga-food-1',
-        name: 'Greater Cleveland Food Bank',
-        category: 'food',
-        categoryLabel: 'Food Assistance',
-        verified: true,
-        distance: 2.3,
-        rating: 4.8,
-        reviewsCount: 124,
-        services: ['Food pantry', 'SNAP support', 'Nutrition programs', 'Senior food boxes'],
-        hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
-        eligibility: 'All residents welcome. No proof of income required.',
-        address: '15500 S Waterloo Rd, Cleveland, OH 44110',
-        phone: '(216) 738-2067',
-        website: 'clevelandfoodbank.org',
-        lat: 41.5645,
-        lon: -81.5623,
-        about: 'Provides emergency food assistance and nutrition counseling to help families achieve food security.'
-      },
-      {
-        id: 'cuyahoga-health-1',
-        name: 'MetroHealth Community Health Center',
-        category: 'health',
-        categoryLabel: 'Healthcare Clinic',
-        verified: true,
-        distance: 3.1,
-        rating: 4.5,
-        reviewsCount: 92,
-        services: ['Primary care', 'Preventive care', 'Chronic disease mgmt', 'Sliding scale'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'Uninsured & insured welcome. Sliding scale fees.',
-        address: '2500 Metrohealth Dr, Cleveland, OH 44109',
-        phone: '(216) 778-7800',
-        website: 'metrohealth.org/community',
-        lat: 41.4705,
-        lon: -81.6980,
-        about: 'Comprehensive ambulatory healthcare clinic serving low-income individuals with sliding fee scale financial aid.'
-      },
-      {
-        id: 'cuyahoga-mental-1',
-        name: 'Neighborhood Family Mental Health Services',
-        category: 'mental',
-        categoryLabel: 'Mental Health',
-        verified: true,
-        distance: 3.4,
-        rating: 4.4,
-        reviewsCount: 76,
-        services: ['Counseling', 'Psychiatry', 'Support groups', 'Crisis intervention'],
-        hoursText: 'Mon - Fri: 9:00 AM - 6:00 PM',
-        eligibility: 'All residents. Medicaid & Medicare accepted.',
-        address: '11627 Clifton Blvd, Cleveland, OH 44102',
-        phone: '(216) 281-2400',
-        website: 'neofamily.org',
-        lat: 41.4880,
-        lon: -81.7680,
-        about: 'Community mental health agency offering behavioral therapy and outpatient substance recovery support.'
-      },
-      {
-        id: 'cuyahoga-transit-1',
-        name: 'RTA Community Mobility Center',
-        category: 'transit',
-        categoryLabel: 'Transportation',
-        verified: true,
-        distance: 1.8,
-        rating: 4.1,
-        reviewsCount: 64,
-        services: ['Medical transit passes', 'Paratransit service', 'Subsidized fare cards'],
-        hoursText: 'Mon - Sun: 6:00 AM - 8:00 PM',
-        eligibility: 'Low income & seniors qualify for free medical transport vouchers.',
-        address: '1240 W 6th St, Cleveland, OH 44113',
-        phone: '(216) 621-9500',
-        website: 'riderta.com',
-        lat: 41.4980,
-        lon: -81.6970,
-        about: 'Provides reliable transportation assistance connecting patients directly to medical appointments.'
-      },
-      {
-        id: 'cuyahoga-housing-1',
-        name: 'Cleveland Housing & Utility Action Network',
-        category: 'housing',
-        categoryLabel: 'Housing & Utilities',
-        verified: false,
-        distance: 4.2,
-        rating: 4.3,
-        reviewsCount: 88,
-        services: ['Utility aid', 'Emergency rental assistance', 'Weatherization'],
-        hoursText: 'Mon - Fri: 8:30 AM - 5:00 PM',
-        eligibility: 'Cuyahoga County low-to-moderate income households.',
-        address: '2999 Payne Ave, Cleveland, OH 44114',
-        phone: '(216) 574-7100',
-        website: 'chnhousingpartners.org',
-        lat: 41.5055,
-        lon: -81.6710,
-        about: 'Helps families maintain safe, affordable housing and prevents utility disconnections.'
-      },
-      {
-        id: 'cuyahoga-social-1',
-        name: 'Step Forward Social Community Services',
-        category: 'social',
-        categoryLabel: 'Social Services',
-        verified: true,
-        distance: 2.9,
-        rating: 4.6,
-        reviewsCount: 51,
-        services: ['Emergency cash assistance', 'Head Start', 'Job placement'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'Income-eligible families in Cuyahoga County.',
-        address: '1801 Superior Ave, Cleveland, OH 44114',
-        phone: '(216) 696-9077',
-        website: 'stepforwardtoday.org',
-        lat: 41.5040,
-        lon: -81.6820,
-        about: 'Community Action Agency fighting poverty by providing family support services and career development.'
-      },
-      {
-        id: 'cuyahoga-gym-1',
-        name: 'YMCA Downtown Fitness & Community Center',
-        category: 'gym',
-        categoryLabel: 'Fitness & Wellness',
-        verified: true,
-        distance: 1.5,
-        rating: 4.7,
-        reviewsCount: 110,
-        services: ['Subsidized gym passes', 'Diabetes prevention classes', 'Senior fitness'],
-        hoursText: 'Mon - Fri: 5:30 AM - 9:00 PM',
-        eligibility: 'Financial assistance available for low-income memberships.',
-        address: '2200 Prospect Ave E, Cleveland, OH 44115',
-        phone: '(216) 344-7700',
-        website: 'clevelandymca.org',
-        lat: 41.5000,
-        lon: -81.6780,
-        about: 'Offers physical wellness programs and chronic disease management exercise groups.'
-      },
-      {
-        id: 'cuyahoga-park-1',
-        name: 'Edgewater Park & Community Green Space',
-        category: 'park',
-        categoryLabel: 'Parks & Recreation',
-        verified: true,
-        distance: 3.8,
-        rating: 4.9,
-        reviewsCount: 340,
-        services: ['Walking trails', 'Fresh air recreation', 'Outdoor fitness equipment'],
-        hoursText: 'Mon - Sun: 6:00 AM - 11:00 PM',
-        eligibility: 'Free public park.',
-        address: '6500 Cleveland Memorial Shoreway, Cleveland, OH 44102',
-        phone: '(216) 635-3200',
-        website: 'clevelandmetroparks.com',
-        lat: 41.4885,
-        lon: -81.7340,
-        about: 'Expansive green space and beachfront promoting physical health and community recreation.'
-      }
-    ]
+    resources: buildTieredCommunityResources('Cleveland, OH', 41.4993, -81.6944, 'cuyahoga')
   },
   wayne: {
     cityName: 'Detroit, MI',
     centerLat: 42.3314,
     centerLng: -83.0458,
-    resources: [
-      {
-        id: 'wayne-campaign-1',
-        name: 'Detroit Community Vaccine & Wellness Drive',
-        category: 'campaign',
-        categoryLabel: 'Live Campaign',
-        verified: true,
-        isCampaign: true,
-        distance: 1.1,
-        rating: 4.9,
-        reviewsCount: 65,
-        services: ['Flu & COVID vaccines', 'Blood pressure screenings', 'Nutrition boxes'],
-        hoursText: 'Today: 8:00 AM - 5:00 PM',
-        eligibility: 'All Detroit & Wayne County residents.',
-        address: 'Hart Plaza, Detroit, MI 48226',
-        phone: '(313) 555-0188',
-        website: 'detroitmi.gov/health',
-        lat: 42.3285,
-        lon: -83.0440,
-        about: 'Free health initiative serving high-priority tracts with preventive health checks and wellness packages.'
-      },
-      {
-        id: 'wayne-food-1',
-        name: 'Gleaners Community Food Bank of SE Michigan',
-        category: 'food',
-        categoryLabel: 'Food Assistance',
-        verified: true,
-        distance: 1.5,
-        rating: 4.9,
-        reviewsCount: 204,
-        services: ['Mobile food pantry', 'Fresh produce distribution', 'Youth meals'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'All Southeast Michigan residents.',
-        address: '2131 Beaufait St, Detroit, MI 48207',
-        phone: '(866) 453-2637',
-        website: 'gcfb.org',
-        lat: 42.3550,
-        lon: -83.0130,
-        about: 'Distributes nutritious food to local pantries and emergency food programs throughout Wayne County.'
-      },
-      {
-        id: 'wayne-health-1',
-        name: 'Covenant Community Care Health Center',
-        category: 'health',
-        categoryLabel: 'Healthcare Clinic',
-        verified: true,
-        distance: 2.8,
-        rating: 4.6,
-        reviewsCount: 115,
-        services: ['Family medicine', 'Dental clinic', 'Behavioral health'],
-        hoursText: 'Mon - Fri: 8:30 AM - 5:00 PM',
-        eligibility: 'Sliding fee scale for uninsured patients.',
-        address: '5716 Michigan Ave, Detroit, MI 48210',
-        phone: '(313) 554-0485',
-        website: 'covenantcommunitycare.org',
-        lat: 42.3260,
-        lon: -83.0980,
-        about: 'Community health center delivering comprehensive medical and dental services to underinsured populations.'
-      }
-    ]
+    resources: buildTieredCommunityResources('Detroit, MI', 42.3314, -83.0458, 'wayne')
   },
   marion: {
     cityName: 'Indianapolis, IN',
     centerLat: 39.7684,
     centerLng: -86.1581,
-    resources: [
-      {
-        id: 'marion-health-1',
-        name: 'Eskenazi Health Center Pecar',
-        category: 'health',
-        categoryLabel: 'Healthcare Clinic',
-        verified: true,
-        distance: 2.6,
-        rating: 4.4,
-        reviewsCount: 89,
-        services: ['Primary care', 'Pediatrics', 'Dental care', 'SDOH navigation'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:00 PM',
-        eligibility: 'Financial assistance available based on income.',
-        address: '6940 Michigan Rd, Indianapolis, IN 46268',
-        phone: '(317) 266-2901',
-        website: 'eskenazihealth.edu',
-        lat: 39.8810,
-        lon: -86.2120,
-        about: 'Comprehensive primary care safety-net health anchor serving Indianapolis communities.'
-      },
-      {
-        id: 'marion-food-1',
-        name: 'Gleaners Food Bank of Indiana',
-        category: 'food',
-        categoryLabel: 'Food Assistance',
-        verified: true,
-        distance: 3.2,
-        rating: 4.8,
-        reviewsCount: 145,
-        services: ['Pantry assistance', 'SNAP enrollment', 'Mobile market'],
-        hoursText: 'Mon - Fri: 9:00 AM - 4:00 PM',
-        eligibility: 'Indiana residents meeting income guidelines.',
-        address: '3737 Waldemere Ave, Indianapolis, IN 46241',
-        phone: '(317) 925-0191',
-        website: 'gleaners.org',
-        lat: 39.7340,
-        lon: -86.2410,
-        about: 'Emergency food distribution hub supplying fresh produce and essential groceries across Marion County.'
-      }
-    ]
+    resources: buildTieredCommunityResources('Indianapolis, IN', 39.7684, -86.1581, 'marion')
   },
   franklin: {
     cityName: 'Columbus, OH',
     centerLat: 39.9612,
     centerLng: -82.9988,
-    resources: [
-      {
-        id: 'franklin-food-1',
-        name: 'Mid-Ohio Food Collective',
-        category: 'food',
-        categoryLabel: 'Food Assistance',
-        verified: true,
-        distance: 2.9,
-        rating: 4.8,
-        reviewsCount: 162,
-        services: ['Food pantry', 'Mobile markets', 'Nutrition education'],
-        hoursText: 'Mon - Fri: 8:30 AM - 4:30 PM',
-        eligibility: 'Franklin County residents.',
-        address: '3960 Brookham Dr, Grove City, OH 43123',
-        phone: '(614) 278-3130',
-        website: 'mofc.org',
-        lat: 39.8780,
-        lon: -83.0520,
-        about: 'Leading regional food bank stabilizing low-income neighborhoods with essential nutrition.'
-      },
-      {
-        id: 'franklin-health-1',
-        name: 'PrimaryOne Health Center',
-        category: 'health',
-        categoryLabel: 'Healthcare Clinic',
-        verified: true,
-        distance: 1.9,
-        rating: 4.5,
-        reviewsCount: 97,
-        services: ['Family medicine', 'OB/GYN', 'Mental health counseling'],
-        hoursText: 'Mon - Fri: 8:00 AM - 5:30 PM',
-        eligibility: 'Sliding scale pricing available.',
-        address: '190 Carpenter St, Columbus, OH 43205',
-        phone: '(614) 645-0556',
-        website: 'primaryonehealth.org',
-        lat: 39.9570,
-        lon: -82.9750,
-        about: 'Federally qualified community health center addressing maternal care and chronic disease prevention.'
-      }
-    ]
+    resources: buildTieredCommunityResources('Columbus, OH', 39.9612, -82.9988, 'franklin')
   }
 }
 
-const activeCommunity = computed(() => resourcesData[selectedId.value] || resourcesData.cuyahoga)
+// Active Community Generator (supports all preset and midwest counties dynamically)
+const activeCommunity = computed(() => {
+  const selectedKey = selectedId.value
+  if (resourcesData[selectedKey]) {
+    return resourcesData[selectedKey]
+  }
+  const match = regionOptions.find(r => r.id === selectedKey)
+  if (match) {
+    return {
+      cityName: match.city ? `${match.city}, ${match.name}` : match.name,
+      centerLat: match.lat,
+      centerLng: match.lon,
+      resources: buildTieredCommunityResources(match.city || match.name, match.lat, match.lon, match.id)
+    }
+  }
+  return resourcesData.cuyahoga
+})
 
 // Backend API Scraped Resources
 const scrapedResources = ref([])
 const isLoadingScrape = ref(false)
 
+// Dynamically Calculate Distances from Active Center Point
 const currentResources = computed(() => {
+  let baseList = []
   if (isAnalyzed.value && scrapedResources.value.length > 0) {
-    return scrapedResources.value
+    baseList = scrapedResources.value
+  } else {
+    baseList = activeCommunity.value.resources
   }
-  return activeCommunity.value.resources
+
+  const { lat: cLat, lng: cLng } = mapCenter.value
+
+  // Attach live calculated distance to each resource
+  return baseList.map(r => {
+    const dist = getHaversineDistanceMiles(cLat, cLng, r.lat, r.lon)
+    return {
+      ...r,
+      distance: dist
+    }
+  })
 })
 
 // Categories Chip List
@@ -606,7 +881,7 @@ function getCategoryCount(catId) {
   return list.filter(r => r.category === catId).length
 }
 
-// Filtered Resources List
+// Filtered Resources List (with accurate radius filter & distance sort)
 const filteredResources = computed(() => {
   let list = currentResources.value
 
@@ -631,7 +906,8 @@ const filteredResources = computed(() => {
     }
   }
 
-  return list
+  // Sort resources by distance (closest first)
+  return list.slice().sort((a, b) => (a.distance || 0) - (b.distance || 0))
 })
 
 // Latitude / Longitude Center

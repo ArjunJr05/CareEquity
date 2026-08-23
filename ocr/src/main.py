@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytesseract
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .extractor import extract
@@ -51,6 +52,14 @@ app = FastAPI(
         "Uses Tesseract OCR + Regex patterns, with Groq LLM fallback."
     ),
     version="2.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

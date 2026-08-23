@@ -1,0 +1,22 @@
+# Streamlit secrets — NEVER commit
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Geocoding / data caches (auto-regenerated, no need to commit)
+geocode_cache.json
+sdoh_geo_cache.json
+
+# Logs and pipeline artefacts
+*.log
+pipeline_*.json
+pipeline_run.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp

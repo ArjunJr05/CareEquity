@@ -1,0 +1,10 @@
+# Normalize line endings for all text files
+* text=auto
+
+# Force LF for Python and config files
+*.py    text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+*.csv   text eol=lf

@@ -1,0 +1,112 @@
+name: CareEquity CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  integration:
+    name: Continuous Integration & Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Ensure .env files exist for CI
+        run: |
+          mkdir -p rag research_assis
+          touch .env rag/.env research_assis/.env
+
+      - name: Verify Docker Compose Configuration
+        run: docker compose config
+
+  Continuous-Deployment:
+    name: Continuous Deployment (EC2 Runner)
+    needs: integration
+    runs-on: self-hosted
+    steps:
+      - name: Fix workspace file permissions
+        run: |
+          sudo chown -R $USER:$USER . || true
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Ensure .env files exist on EC2 deployment
+        run: |
+          mkdir -p rag research_assis kg backend
+          
+          # Root .env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > .env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> .env
+          echo "NEO4J_URI=${{ secrets.NEO4J_URI }}" >> .env
+          echo "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" >> .env
+          echo "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" >> .env
+          echo "RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" >> .env
+          echo "RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}" >> .env
+          
+          # backend/.env
+          echo "RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" > backend/.env
+          echo "RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}" >> backend/.env
+          echo "DATABASE_URL=postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb" >> backend/.env
+
+          # rag/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > rag/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> rag/.env
+
+          # research_assis/.env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > research_assis/.env
+          echo "NVIDIA_API_KEY=${{ secrets.NVIDIA_API_KEY }}" >> research_assis/.env
+
+          # kg/.env
+          echo "NEO4J_URI=${{ secrets.NEO4J_URI }}" > kg/.env
+          echo "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" >> kg/.env
+          echo "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" >> kg/.env
+
+      - name: Expand EBS partition to full 30GB capacity
+        run: |
+          sudo growpart /dev/nvme0n1 1 || true
+          sudo resize2fs /dev/nvme0n1p1 || sudo resize2fs /dev/root || sudo xfs_growfs / || true
+
+      - name: Clean disk space before build
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
+          sudo rm -rf /tmp/* /var/tmp/* ~/.cache/pip ~/.npm ~/.gradle || true
+          sudo apt-get autoremove -y || true
+          sudo apt-get clean || true
+          echo "=== Disk space after cleanup ==="
+          df -h
+
+      - name: Ensure Swap space exists (Prevents OOM exit code 137)
+        run: |
+          if ! grep -q '/swapfile' /proc/swaps; then
+            sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile || true
+          fi
+
+      - name: Build and Start CareEquity Multi-Container Stack
+        timeout-minutes: 20
+        run: |
+          export DOCKER_BUILDKIT=1
+          docker compose build
+          docker compose up -d --remove-orphans
+
+      - name: Verify Running Containers
+        run: |
+          docker compose ps
+
+      - name: Clean unused images
+        run: |
+          docker image prune -f || true

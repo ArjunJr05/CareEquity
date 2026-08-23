@@ -2,14 +2,79 @@ services:
 
   main-backend:
     build:
-      context: ./ocr
       context: ./backend
       dockerfile: Dockerfile
     container_name: careequity-main-backend
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:3513@host.docker.internal:5432/careequity
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/src:/app/src
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ocr-backend:
+    build:
+      context: ./ocr
+      dockerfile: Dockerfile
+    container_name: careequity-ocr-backend
+    ports:
+      - "8001:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./ocr/src:/app/src
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  rag-backend:
+    build:
+      context: ./rag
+      dockerfile: Dockerfile
+    container_name: careequity-rag-backend
+    ports:
+      - "8002:8000"
+    env_file:
+      - ./rag/.env
+    environment:
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-8357afa1}
+      - AURA_INSTANCEID=${AURA_INSTANCEID:-8357afa1}
+      - AURA_INSTANCENAME=${AURA_INSTANCENAME:-Instance01}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - FASTAPI_URL=http://localhost:8002
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -26,6 +91,83 @@ services:
       retries: 5
       start_period: 20s
 
+  agent-backend:
+    build:
+      context: ./research_assis
+      dockerfile: Dockerfile
+    container_name: careequity-agent-backend
+    ports:
+      - "8003:8000"
+    env_file:
+      - ./research_assis/.env
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  kg-backend:
+    build:
+      context: ./kg
+      dockerfile: Dockerfile
+    container_name: careequity-kg-backend
+    ports:
+      - "8004:8000"
+    env_file:
+      - ./kg/.env
+    environment:
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-8357afa1}
+      - AURA_INSTANCEID=${AURA_INSTANCEID:-8357afa1}
+      - AURA_INSTANCENAME=${AURA_INSTANCENAME:-Instance01}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ngo-backend:
+    build:
+      context: ./ngo_connect
+      dockerfile: Dockerfile
+    container_name: careequity-ngo-backend
+    ports:
+      - "8005:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   main-frontend:
     build:
       context: ./frontend
@@ -33,21 +175,8 @@ services:
     container_name: careequity-main-frontend
     ports:
       - "5173:5173"
-    depends_on:
-      main-backend:
-        condition: service_healthy
+    volumes:
+      - ./frontend/src:/app/src
     restart: unless-stopped
 
-  ocr-frontend:
-    build:
-      context: ./ocr/ocr-ui
-      dockerfile: Dockerfile
-    container_name: careequity-ocr-frontend
-    ports:
-      - "8501:8501"
-    environment:
-      BACKEND_URL: http://main-backend:8000
-    depends_on:
-      main-backend:
-        condition: service_healthy
-    restart: unless-stopped
+

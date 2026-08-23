@@ -1,19 +1,24 @@
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from './components/dashboard/AppSidebar.vue'
 import AppHeader from './components/dashboard/AppHeader.vue'
 import FloatingChatbot from './components/dashboard/FloatingChatbot.vue'
-import { isAnalyzed, isLoggedIn, isAdmin, showLoginScreen, setPatientData } from './store/appState'
+import { isAnalyzed, isLoggedIn, isAdmin, showLoginScreen, setPatientData, syncUserSubscription } from './store/appState'
 import { MAIN_BACKEND_URL } from './config'
 
 const route = useRoute()
 const router = useRouter()
 
+const isAdminRoute = computed(() => route.path.startsWith('/admin'))
+
 // Boot user from admin panel on logout
 watch([isLoggedIn, isAdmin], ([newLoggedIn, newAdmin]) => {
   if (route.path === '/admin' && (!newLoggedIn || !newAdmin)) {
     router.push('/login')
+  }
+  if (newLoggedIn) {
+    syncUserSubscription(MAIN_BACKEND_URL)
   }
 })
 
@@ -44,11 +49,7 @@ watch(showLoginScreen, (newVal) => {
 
 onMounted(async () => {
   try {
-    const response = await fetch(`${MAIN_BACKEND_URL}/api/patients/latest`)
-    if (response.ok) {
-      const data = await response.json()
-      setPatientData(data)
-    }
+    syncUserSubscription(MAIN_BACKEND_URL)
   } catch (error) {
     console.warn('Backend server not reachable, using local fallback state:', error)
   }
@@ -57,7 +58,7 @@ onMounted(async () => {
 
 <template>
   <!-- 1. Explicitly requested full-screen views (Login, DataSetup, Plan) -->
-  <div v-if="route.path === '/login' || route.path === '/setup' || route.path === '/plan'" class="full-page-container">
+  <div v-if="route.path === '/login' || route.path === '/setup' || route.path === '/' || route.path === '/plan'" class="full-page-container">
     <router-view />
   </div>
 
@@ -70,7 +71,7 @@ onMounted(async () => {
         <router-view />
       </div>
     </div>
-    <FloatingChatbot />
+    <FloatingChatbot v-if="!isAdminRoute" />
   </div>
 </template>
 
@@ -98,7 +99,8 @@ onMounted(async () => {
 .shell-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
 }

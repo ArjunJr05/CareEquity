@@ -26,3 +26,7 @@ class UserResponse(UserBase):
 class OTPVerify(BaseModel):
     email: str = Field(..., example="john@example.com")
     otp: str = Field(..., example="123456")
+
+class UserLogout(BaseModel):
+    email: Optional[str] = None
+

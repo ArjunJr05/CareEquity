@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import Overview from '../pages/Overview.vue'
 import EquityMap from '../pages/EquityMap.vue'
 import SDOHInsights from '../pages/SDOHInsights.vue'
@@ -9,34 +9,25 @@ import Reports from '../pages/Reports.vue'
 import Login from '../pages/Login.vue'
 import DataSetup from '../pages/DataSetup.vue'
 import Admin from '../pages/Admin.vue'
+import AdminUsers from '../pages/AdminUsers.vue'
+import AdminPlans from '../pages/AdminPlans.vue'
 import Plan from '../pages/Plan.vue'
 import { isAnalyzed, isLoggedIn, isAdmin } from '../store/appState'
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(),
   routes: [
     {
-      path: '/setup',
+      path: '/',
       name: 'setup',
       component: DataSetup,
     },
     {
-      path: '/login',
-      name: 'login',
-      component: Login,
+      path: '/setup',
+      redirect: '/',
     },
     {
-      path: '/admin',
-      name: 'admin',
-      component: Admin,
-    },
-    {
-      path: '/plan',
-      name: 'plan',
-      component: Plan,
-    },
-    {
-      path: '/',
+      path: '/overview',
       name: 'overview',
       component: Overview,
     },
@@ -66,6 +57,32 @@ const router = createRouter({
       component: Interventions,
     },
     {
+      path: '/login',
+      name: 'login',
+      component: Login,
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: Admin,
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: AdminUsers,
+    },
+    {
+      path: '/admin/plans',
+      name: 'admin-plans',
+      component: AdminPlans,
+    },
+    {
+      path: '/plan',
+      alias: '/plans',
+      name: 'plan',
+      component: Plan,
+    },
+    {
       path: '/reports',
       name: 'reports',
       component: Reports,
@@ -75,21 +92,14 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   if (isLoggedIn.value && isAdmin.value) {
-    // Admin is strictly restricted to /admin (or logout/login route path)
-    if (to.name === 'admin' || to.name === 'login') {
+    if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans' || to.name === 'login') {
       next()
     } else {
       next({ name: 'admin' })
     }
   } else {
-    // Normal user / guest flow
-    if (to.name === 'admin') {
+    if (to.name === 'admin' || to.name === 'admin-users' || to.name === 'admin-plans') {
       next({ name: 'login' })
-    } else if (to.name !== 'setup' && to.name !== 'login' && to.name !== 'plan' && !isAnalyzed.value) {
-      next({ name: 'setup' })
-    } else if (to.name === 'setup' && isAnalyzed.value) {
-      isAnalyzed.value = false
-      next()
     } else {
       next()
     }
