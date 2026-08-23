@@ -239,20 +239,29 @@ const reportTemplatesData = {
 const activeReportData = computed(() => {
   if (isAnalyzed.value && activeGeography.value === 'Active Patient' && mlPredictionResults.value) {
     const risk = mlPredictionResults.value.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-    const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
-    const pctHigh = Math.round(avgRisk * 100)
+    const compRisk = mlPredictionResults.value.overall_composite_risk_score ?? (Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length)
+    const patientEquityScore = Math.round((1 - compRisk) * 100)
+    const pctHigh = Math.round(compRisk * 100)
     
+    let cPred = null
+    if (mlPredictionResults.value.county_predictions && mlPredictionResults.value.county_predictions.length > 0) {
+      cPred = mlPredictionResults.value.county_predictions[0]
+    }
+    const ctx = cPred?.county_full_context || {}
+    const sviVal = ctx.svi_overall ?? 0.38
+    const locationName = cPred ? `${cPred.location.county_name}, ${cPred.location.state}` : (patientData.value.county ? `${patientData.value.county}, ${patientData.value.state}` : 'Cleveland, OH')
+
     return {
       title: 'Individual Patient Health Risk Assessment',
-      completedDate: `${patientData.value.name} &bull; Individual Report`,
-      equityScore: Math.round((1 - avgRisk) * 100),
-      equityLabel: avgRisk > 0.7 ? 'Critical Risk' : (avgRisk > 0.5 ? 'High Risk' : 'Moderate'),
+      completedDate: `${patientData.value.name || 'Active Patient'} &bull; Individual Report`,
+      equityScore: patientEquityScore,
+      equityLabel: compRisk > 0.65 ? 'Critical Risk' : (compRisk > 0.35 ? 'Moderate' : 'Low Risk'),
       population: '1 (Individual)',
       popTrend: 'N/A',
       highRiskPop: '1 Active Patient',
       highRiskPct: `${pctHigh}% Clinical Risk Index`,
-      equityGap: `${Math.round(avgRisk * 100)} pts`,
-      interventions: mlPredictionResults.value.sdoh_barriers?.length || 3,
+      equityGap: `${Math.round(compRisk * 100)} pts`,
+      interventions: mlPredictionResults.value.sdoh_barriers?.length || 4,
       domains: [
         { name: 'Diabetes Risk', score: Math.round((risk.diabetes || 0.5) * 100), color: '#3b82f6' },
         { name: 'Hypertension Risk', score: Math.round((risk.hypertension || 0.5) * 100), color: '#10b981' },
@@ -274,13 +283,13 @@ const activeReportData = computed(() => {
             'Transportation accessibility limits'
           ]).map((barrier, index) => ({
         name: barrier,
-        score: 0.85 - index * 0.1,
+        score: parseFloat((0.85 - index * 0.1).toFixed(2)),
         color: ['#8b5cf6', '#10b981', '#f97316', '#3b82f6', '#ef4444'][index % 5]
       })),
       tableAreas: [
-        { name: `${patientData.value.name} (Patient)`, score: avgRisk.toFixed(2), svi: 0.65, pop: '1' },
-        { name: patientData.value.locations && patientData.value.locations[0] ? `${patientData.value.locations[0].county} (County Avg)` : 'Bronx County (County Avg)', score: (avgRisk * 0.85).toFixed(2), svi: 0.58, pop: '1.4M' },
-        { name: 'Metro Health District', score: (avgRisk * 0.72).toFixed(2), svi: 0.52, pop: '850K' },
+        { name: `${patientData.value.name || 'Active Patient'} (Patient)`, score: compRisk.toFixed(2), svi: sviVal, pop: '1' },
+        { name: `${locationName} (County Avg)`, score: (compRisk * 0.85).toFixed(2), svi: (sviVal * 0.9).toFixed(2), pop: ctx.population ? `${(ctx.population / 1000000).toFixed(1)}M` : '1.4M' },
+        { name: 'Metro Health District', score: (compRisk * 0.72).toFixed(2), svi: (sviVal * 0.8).toFixed(2), pop: '850K' },
         { name: 'State Baseline Average', score: '0.38', svi: 0.42, pop: '11.7M' },
         { name: 'National Health Target', score: '0.25', svi: 0.30, pop: '330M' }
       ],
@@ -1241,7 +1250,7 @@ function exportCSV() {
                 :disabled="isAgentLoading"
                 style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%); color: #ffffff; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);"
               >
-                <span>{{ isAgentLoading ? 'Synthesizing...' : '⚡ Run Agent Synthesis' }}</span>
+                
               </button>
             </div>
 

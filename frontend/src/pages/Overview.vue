@@ -336,16 +336,29 @@ const activeCommunity = computed(() => {
       locState = 'Kansas'
     }
 
-    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'KS'}`
+    const rawCName = (locCounty || '').split(',')[0].replace(/\s+County$/i, '').trim()
+    const rawSName = (locState || '').replace(/^.*,\s*/, '').trim()
+    const displayName = rawSName ? `${rawCName} County, ${rawSName}` : `${rawCName} County`
 
     // Dynamic SDoH and Equity scores from V3 pipeline
+    const mlRes = mlPredictionResults.value
+    const compositeRisk = (mlRes && typeof mlRes.overall_composite_risk_score === 'number') 
+      ? mlRes.overall_composite_risk_score 
+      : (avgRisk > 0 ? avgRisk : 0.2416)
+
+    const patientHealthScoreVal = Math.round((1 - compositeRisk) * 100)
+    const patientHealthRiskLevelVal = (mlRes && mlRes.overall_risk_tier) 
+      ? mlRes.overall_risk_tier 
+      : (compositeRisk >= 0.65 ? 'High Risk' : (compositeRisk >= 0.35 ? 'Mid Risk' : 'Low Risk'))
+
     const sviVal = countyPred?.county_full_context?.svi_overall ?? (hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3)))
     const foodAccessVal = countyPred?.county_full_context?.food_insecurity ? (countyPred.county_full_context.food_insecurity / 100) : (hasPred ? pred.scores.food_security : Math.max(0.15, 0.85 - (avgRisk * 0.5)))
     const envVal = countyPred?.county_full_context?.housing_insecurity ? (countyPred.county_full_context.housing_insecurity / 100) : (hasPred ? pred.scores.neighborhood_environment : (0.40 + (avgRisk * 0.25)))
     const healthAccessVal = countyPred?.county_full_context?.lack_health_insurance ? (countyPred.county_full_context.lack_health_insurance / 100) : (hasPred ? pred.scores.healthcare_access : Math.max(0.20, 0.90 - (avgRisk * 0.4)))
 
-    const v3EquityScore = countyPred?.county_health_equity_score ?? Math.round((1 - avgRisk) * 100)
-    const v3EquityLevel = countyPred?.county_health_equity_level ?? (avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')))
+    // SDoH Health Equity Score for the County (Center Card)
+    const sdohCountyEquityScore = countyPred?.county_health_equity_score ?? Math.round((1 - avgRisk) * 100)
+    const sdohCountyEquityLevel = countyPred?.county_health_equity_level ?? (avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')))
 
     // Extract top 3 SDoH barriers across diseases from V3 county_predictions
     let factorsList = []
@@ -382,8 +395,10 @@ const activeCommunity = computed(() => {
       environmentalLevel: envVal > 0.6 ? 'High' : 'Moderate',
       healthcareAccess: typeof healthAccessVal === 'number' ? healthAccessVal.toFixed(2) : '0.50',
       healthcareAccessLevel: healthAccessVal > 0.6 ? 'Good' : 'Moderate',
-      equityScore: v3EquityScore,
-      equityLevel: v3EquityLevel,
+      equityScore: sdohCountyEquityScore,
+      equityLevel: sdohCountyEquityLevel,
+      patientHealthScore: patientHealthScoreVal,
+      patientHealthLevel: patientHealthRiskLevelVal,
       center: [parseFloat(patientData.value?.lat) || 38.2917, parseFloat(patientData.value?.long) || -76.5413],
       bounds: [],
       factors: factorsList
@@ -403,48 +418,99 @@ const patientCommunity = computed(() => {
   return activeCommunity.value
 })
 
-// Compare metrics helper list
+// Compare metrics helper list (Patient vs County)
 const sidebarCompareMetrics = computed(() => {
-  const commA = isAnalyzed.value ? patientCommunity.value : selectedCommunity.value
-  const commB = isAnalyzed.value ? selectedCommunity.value : (selectedId.value === 'marion' ? communities['cuyahoga'] : communities['marion'])
-  
-  const getMetrics = (comm) => {
-    if (!comm) return { healthcare: 50, social: 50, economic: 50, food: 50, environmental: 50, healthOutcomes: 50 }
-    if (comm.id === 'patient') {
-      const pred = predictionModelResults.value
-      const pScores = pred?.scores || {}
-      const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-      const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
-      return {
-        healthcare: pred ? Math.round((pScores.healthcare_access || 0.5) * 100) : 40,
-        social: pred ? Math.round((pScores.social_context || 0.5) * 100) : 65,
-        economic: pred ? Math.round((pScores.economic_stability || 0.5) * 100) : 55,
-        food: pred ? Math.round((pScores.food_security || 0.5) * 100) : 35,
-        environmental: pred ? Math.round((pScores.neighborhood_environment || 0.5) * 100) : 55,
-        healthOutcomes: Math.round((1 - avgRisk) * 100)
-      }
-    }
-    return {
-      healthcare: Math.round(parseFloat(comm.healthcareAccess || 0.5) * 100),
-      social: Math.round(parseFloat(comm.sviScore || 0.5) * 100),
-      economic: Math.round((1 - parseFloat(comm.healthRisk || 0.5)) * 100),
-      food: Math.round(parseFloat(comm.foodAccess || 0.5) * 100),
-      environmental: Math.round(parseFloat(comm.environmental || 0.5) * 100),
-      healthOutcomes: Math.round(parseFloat(comm.equityScore || 50))
-    }
+  let cPred = null
+  if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > selectedLocationIdx.value) {
+    cPred = mlPredictionResults.value.county_predictions[selectedLocationIdx.value]
   }
 
-  const metricsA = getMetrics(commA)
-  const metricsB = getMetrics(commB)
+  // Get SDoH context from V3 pipeline JSON if available
+  const ctx = cPred?.county_full_context || {}
+  const ind = cPred?.sdoh_indicator_levels || {}
+
+  // County metrics derived from V3 SDoH JSON
+  const countyHealthcare = Math.round(100 - (ctx.lack_health_insurance ?? (ind.lack_health_insurance?.value ?? 9.2) * 4))
+  const countySocial = Math.round(100 - ((ctx.svi_overall ?? 0.38) * 100))
+  const countyEconomic = Math.round(100 - (ind.poverty_rate?.value ?? 11.5) * 3)
+  const countyFood = Math.round(100 - (ctx.food_insecurity ?? (ind.food_insecurity?.value ?? 12.4) * 3))
+  const countyEnv = Math.round(100 - (ctx.housing_insecurity ?? (ind.housing_insecurity?.value ?? 10.1) * 3))
+  const countyHealthOutcomes = cPred?.county_health_equity_score ?? 62
+
+  // Patient metrics derived from individual medical payload & composite risk
+  const patientDataObj = patientData.value || {}
+  const isDiabetic = patientDataObj.diabetes === 'Yes' || patientDataObj.glucose > 125
+  const isHyper = patientDataObj.hypertension === 'Yes'
+  const isHeart = patientDataObj.heart_disease === 'Yes'
+
+  // Patient health score computed from composite risk
+  const compRisk = mlPredictionResults.value?.overall_composite_risk_score ?? 0.2416
+  const patientHealthScore = Math.round((1 - compRisk) * 100)
+
+  // Patient individual SDoH impact indicators
+  const patientHealthcare = Math.min(95, Math.max(20, countyHealthcare + (patientDataObj.insurance === 'No' ? -25 : 5)))
+  const patientSocial = Math.min(95, Math.max(20, countySocial - (patientDataObj.er_visits > 2 ? 15 : 0)))
+  const patientEconomic = Math.min(95, Math.max(20, countyEconomic + (isHeart ? -10 : 0)))
+  const patientFood = Math.min(95, Math.max(20, countyFood + (isDiabetic ? -12 : 0)))
+  const patientEnv = Math.min(95, Math.max(20, countyEnv + (isHyper ? -8 : 0)))
 
   return [
-    { label: 'Healthcare Access', a: metricsA.healthcare, b: metricsB.healthcare },
-    { label: 'Social Stability', a: metricsA.social, b: metricsB.social },
-    { label: 'Economic Stability', a: metricsA.economic, b: metricsB.economic },
-    { label: 'Food Access', a: metricsA.food, b: metricsB.food },
-    { label: 'Environmental Safety', a: metricsA.environmental, b: metricsB.environmental },
-    { label: 'Health Outcomes', a: metricsA.healthOutcomes, b: metricsB.healthOutcomes }
+    { label: 'Healthcare Access', a: patientHealthcare, b: countyHealthcare },
+    { label: 'Social Stability', a: patientSocial, b: countySocial },
+    { label: 'Economic Stability', a: patientEconomic, b: countyEconomic },
+    { label: 'Food Access', a: patientFood, b: countyFood },
+    { label: 'Environmental Safety', a: patientEnv, b: countyEnv },
+    { label: 'Health Outcomes', a: patientHealthScore, b: countyHealthOutcomes }
   ]
+})
+
+// Dynamic AI-Powered Insight strip computed from V3 prediction JSON
+const aiPoweredInsight = computed(() => {
+  let cPred = null
+  if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > selectedLocationIdx.value) {
+    cPred = mlPredictionResults.value.county_predictions[selectedLocationIdx.value]
+  }
+
+  const ctx = cPred?.county_full_context || {}
+  const ind = cPred?.sdoh_indicator_levels || {}
+  const compositeRisk = mlPredictionResults.value?.overall_composite_risk_score ?? 0.2416
+
+  // Determine highest risk factor & impact score
+  const foodScore = (ctx.food_insecurity ?? 12.4) / 25
+  const housingScore = (ctx.housing_insecurity ?? 10.1) / 20
+  const uninsScore = (ctx.lack_health_insurance ?? 9.2) / 20
+
+  let highestFactor = 'Housing Instability'
+  let highestImpact = Math.round(housingScore * 100) / 100
+  if (foodScore > housingScore && foodScore > uninsScore) {
+    highestFactor = 'Food Insecurity'
+    highestImpact = Math.round(foodScore * 100) / 100
+  } else if (uninsScore > housingScore && uninsScore > foodScore) {
+    highestFactor = 'Healthcare Uninsurance'
+    highestImpact = Math.round(uninsScore * 100) / 100
+  }
+
+  // Rising concern & trend percentage
+  const risingConcern = highestFactor === 'Food Insecurity' ? 'Housing Instability' : 'Food Insecurity'
+  const trendPct = Math.round((ctx.food_insecurity ?? 12.4) * 1.4)
+
+  // Opportunity area & impact level
+  const oppArea = (ctx.lack_health_insurance ?? 9.2) > 10 ? 'Uninsured Coverage' : 'Preventive Care Access'
+  const impactLevel = compositeRisk > 0.35 ? 'High' : 'Moderate'
+
+  const descText = cPred 
+    ? `In ${cPred.location.county_name}, SVI (${ctx.svi_overall ?? 0.38}) and food insecurity (${ctx.food_insecurity ?? 12.4}%) contribute to elevated composite risk (${Math.round(compositeRisk * 100)}%).`
+    : 'Communities with high social vulnerability and limited food access have 2.3x higher risk of preventable hospitalizations.'
+
+  return {
+    description: descText,
+    highestRiskFactor: highestFactor,
+    highestImpactScore: highestImpact > 0 ? highestImpact.toFixed(2) : '0.82',
+    risingConcern: risingConcern,
+    trendPercent: trendPct,
+    opportunityArea: oppArea,
+    potentialImpact: impactLevel
+  }
 })
 
 
@@ -872,7 +938,6 @@ const handleSendMessage = () => {
               <div style="width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                 <div>
                   <h4 class="font-bold" style="margin: 0;">{{ selectedCommunity.name }}</h4>
-                  <p v-if="selectedCommunity.state" style="margin: 2px 0 0; font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">{{ selectedCommunity.state }}</p>
                 </div>
 
                 <!-- Location Selector Dropdown when multiple locations provided -->
@@ -883,7 +948,7 @@ const handleSendMessage = () => {
                     style="width: 100%; padding: 5px 10px; font-size: 0.78rem; font-weight: 600; color: #1e293b; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; cursor: pointer; transition: all 0.2s ease;"
                   >
                     <option v-for="(loc, idx) in availableLocations" :key="idx" :value="idx">
-                      📍 {{ loc.county.replace(/\s+County$/i, '') }}, {{ loc.state }}
+                      📍 {{ loc.county.replace(/\s+County$/i, '').replace(/,.*$/, '') }} County, {{ loc.state.replace(/^.*,\s*/, '') }}
                     </option>
                   </select>
                 </div>
@@ -941,29 +1006,28 @@ const handleSendMessage = () => {
           <div class="insight-main">
             <p class="insight-title"><IconBase name="sparkle" :size="16" /> AI-Powered Insight</p>
             <p class="insight-desc">
-              Communities with high social vulnerability and limited food access have 2.3x higher
-              risk of preventable hospitalizations.
+              {{ aiPoweredInsight.description }}
             </p>
             <router-link to="/sdoh-insights" class="link-arrow font-bold">View Details <IconBase name="chevron-right" :size="13" /></router-link>
           </div>
 
           <div class="insight-metric">
-            <p class="metric-label">Highest Risk Factor</p>
-            <p class="metric-value">Housing Instability</p>
-            <div class="metric-bar"><span style="width: 82%"></span></div>
-            <p class="metric-caption">Impact Score <b>0.82</b></p>
+            <p class="metric-label">HIGHEST RISK FACTOR</p>
+            <p class="metric-value">{{ aiPoweredInsight.highestRiskFactor }}</p>
+            <div class="metric-bar"><span :style="{ width: (parseFloat(aiPoweredInsight.highestImpactScore) * 100) + '%' }"></span></div>
+            <p class="metric-caption">Impact Score <b>{{ aiPoweredInsight.highestImpactScore }}</b></p>
           </div>
 
           <div class="insight-metric">
-            <p class="metric-label">Rising Concern</p>
-            <p class="metric-value">Food Insecurity</p>
-            <p class="metric-trend up"><IconBase name="arrow-up" :size="12" /> Trend 18%</p>
+            <p class="metric-label">RISING CONCERN</p>
+            <p class="metric-value">{{ aiPoweredInsight.risingConcern }}</p>
+            <p class="metric-trend up"><IconBase name="arrow-up" :size="12" /> Trend {{ aiPoweredInsight.trendPercent }}%</p>
           </div>
 
           <div class="insight-metric">
-            <p class="metric-label">Opportunity Area</p>
-            <p class="metric-value">Preventive Care Access</p>
-            <p class="metric-caption">Potential Impact <b class="high-text">High</b></p>
+            <p class="metric-label">OPPORTUNITY AREA</p>
+            <p class="metric-value">{{ aiPoweredInsight.opportunityArea }}</p>
+            <p class="metric-caption">Potential Impact <b class="high-text">{{ aiPoweredInsight.potentialImpact }}</b></p>
           </div>
         </section>
       </div>
@@ -975,14 +1039,14 @@ const handleSendMessage = () => {
         <article class="card score-card" v-if="selectedCommunity">
           <p class="popup-label">{{ isAnalyzed ? 'Patient Health Score' : 'Health Equity Score' }}</p>
           <div class="score-big">
-            <span class="num">{{ isAnalyzed ? patientCommunity.equityScore : selectedCommunity.equityScore }}</span><span class="denom">/100</span>
-            <span class="pill font-bold" :class="(isAnalyzed ? patientCommunity.equityLevel : selectedCommunity.equityLevel).toLowerCase().replace(' ', '-')">
-              {{ isAnalyzed ? patientCommunity.equityLevel : selectedCommunity.equityLevel }}
+            <span class="num">{{ isAnalyzed ? (patientCommunity.patientHealthScore ?? patientCommunity.equityScore) : selectedCommunity.equityScore }}</span><span class="denom">/100</span>
+            <span class="pill font-bold" :class="(isAnalyzed ? (patientCommunity.patientHealthLevel ?? patientCommunity.equityLevel) : selectedCommunity.equityLevel).toLowerCase().replace(' ', '-')">
+              {{ isAnalyzed ? (patientCommunity.patientHealthLevel ?? patientCommunity.equityLevel) : selectedCommunity.equityLevel }}
             </span>
           </div>
           <div class="gap-row">
             <span>{{ isAnalyzed ? 'Health Gap' : 'Equity Gap' }}</span>
-            <b>{{ 100 - (isAnalyzed ? patientCommunity.equityScore : selectedCommunity.equityScore) }} pts</b>
+            <b>{{ 100 - (isAnalyzed ? (patientCommunity.patientHealthScore ?? patientCommunity.equityScore) : selectedCommunity.equityScore) }} pts</b>
           </div>
           <p class="gap-caption">vs. National Average</p>
 
