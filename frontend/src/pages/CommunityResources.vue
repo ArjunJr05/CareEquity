@@ -257,7 +257,17 @@ function buildTieredCommunityResources(cityName, centerLat, centerLng, prefix = 
   const cosLat = Math.cos(rad) || 0.75
 
   const offsetCoord = (distMiles, angleDeg) => {
-    const angleRad = angleDeg * (Math.PI / 180)
+    // Cleveland lies south of Lake Erie (North is water).
+    // Restrict/adjust angles so points land on ground (angles between 90° and 270° correspond to East, South, West).
+    let safeAngle = angleDeg
+    if (cityName.includes('Cleveland') || centerLat > 41.4) {
+      // Map any northern angles (0-80 or 280-360) to inland southern/western directions
+      if (angleDeg < 90 || angleDeg > 270) {
+        safeAngle = 100 + (angleDeg % 160)
+      }
+    }
+
+    const angleRad = safeAngle * (Math.PI / 180)
     const dLat = (distMiles / 69.0) * Math.cos(angleRad)
     const dLon = (distMiles / (69.0 * cosLat)) * Math.sin(angleRad)
     return {

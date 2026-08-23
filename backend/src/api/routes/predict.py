@@ -4,34 +4,23 @@ import pickle
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Body
 
-# Dynamic placeholder class for unpickling ml_pipelineV2.pkl in lightweight backend
-class MedicalSDOHInferencePipelineV2:
-    def predict(self, ocr_payload):
-        locations = ocr_payload.get('locations', [{'county': 'Limestone', 'state': 'AL'}])
-        county_results = []
-        for loc in locations:
-            c_name = loc.get('county', 'Unknown')
-            st = loc.get('state', 'AL')
-            county_results.append({
-                "location": {"state": st, "county_name": f"{c_name} County", "county_fips": "01083"},
-                "diseases": {
-                    "diabetes": {"probability": 0.68, "risk_tier": "High Risk", "top_3_sdoh_factors": [{"sdoh_factor": "poverty_rate", "shap_impact": 0.42, "county_value": 18.5, "unit": "%"}]},
-                    "hypertension": {"probability": 0.74, "risk_tier": "High Risk", "top_3_sdoh_factors": [{"sdoh_factor": "obesity_prevalence", "shap_impact": 0.38, "county_value": 34.2, "unit": "%"}]},
-                    "heart_disease": {"probability": 0.28, "risk_tier": "Low Risk", "top_3_sdoh_factors": [{"sdoh_factor": "smoking_prevalence", "shap_impact": 0.15, "county_value": 19.1, "unit": "%"}]},
-                    "asthma": {"probability": 0.45, "risk_tier": "Moderate Risk", "top_3_sdoh_factors": [{"sdoh_factor": "housing_insecurity", "shap_impact": 0.22, "county_value": 12.4, "unit": "%"}]}
-                }
-            })
-        return {
-            "pipeline_version": "V2",
-            "status": "success",
-            "patient_id": ocr_payload.get("patient_id", "OCR_PATIENT_001"),
-            "is_multi_county": len(locations) > 1,
-            "evaluated_counties_count": len(locations),
-            "county_predictions": county_results
-        }
+# Dynamically append potential ML directory locations to sys.path
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+possible_ml_dirs = [
+    os.path.abspath(os.path.join(current_file_dir, "..", "..", "..", "ML")),
+    os.path.abspath(os.path.join(current_file_dir, "..", "..", "ML")),
+    os.path.abspath(os.path.join(current_file_dir, "..", "ML")),
+    "/app/ML",
+    "/app"
+]
+for d in possible_ml_dirs:
+    if os.path.exists(d) and d not in sys.path:
+        sys.path.insert(0, d)
 
-sys.modules['ml_pipelineV2'] = sys.modules[__name__]
-sys.modules['ml_pipelineV2'].MedicalSDOHInferencePipelineV2 = MedicalSDOHInferencePipelineV2
+try:
+    from ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict as ml_v3_predict
+except ImportError:
+    from ML.ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict as ml_v3_predict
 
 router = APIRouter(
     prefix="",
@@ -43,29 +32,13 @@ pipeline_instance = None
 def get_pipeline():
     global pipeline_instance
     if pipeline_instance is None:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-        workspace_root = os.path.abspath(os.path.join(backend_dir, ".."))
-        
-        candidate_paths = [
-            os.path.join(workspace_root, "ML", "ml_pipelineV2.pkl"),
-            os.path.join(workspace_root, "ml_pipelineV2.pkl"),
-            os.path.join(backend_dir, "ML", "ml_pipelineV2.pkl"),
-            os.path.join(current_dir, "ml_pipelineV2.pkl")
-        ]
-        
-        for path in candidate_paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, "rb") as f:
-                        pipeline_instance = pickle.load(f)
-                    print("Successfully loaded pre-trained ml_pipelineV2.pkl!")
-                    break
-                except Exception as e:
-                    print(f"Loading .pkl with default backend class fallback: {e}")
-                    
-        if pipeline_instance is None:
-            pipeline_instance = MedicalSDOHInferencePipelineV2()
+        print("⚙️ Initializing and fitting fresh MedicalSDOHInferencePipelineV3 instance for dynamic prediction...")
+        pipeline_instance = MedicalSDOHInferencePipelineV3()
+        try:
+            pipeline_instance.fit()
+            print("✅ MedicalSDOHInferencePipelineV3 fitted successfully!")
+        except Exception as e:
+            print(f"Note on fitting pipeline: {e}")
 
     return pipeline_instance
 

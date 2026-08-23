@@ -5,11 +5,16 @@ import IconBase from '../components/dashboard/IconBase.vue'
 import { patientData, mlPredictionResults, predictionModelResults, isAnalyzed } from '../store/appState'
 
 const patientSidebarData = computed(() => {
-  const risk = mlPredictionResults.value?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
+  const mlRes = mlPredictionResults.value
+  const risk = mlRes?.risk_scores || { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
   const avgRisk = Object.values(risk).reduce((a, b) => a + b, 0) / Object.values(risk).length
+  const compositeRisk = (mlRes && typeof mlRes.overall_composite_risk_score === 'number') 
+    ? mlRes.overall_composite_risk_score 
+    : (avgRisk > 0 ? avgRisk : 0.2416)
+
   return {
-    equityScore: Math.round((1 - avgRisk) * 100),
-    equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
+    equityScore: Math.round((1 - compositeRisk) * 100),
+    equityLevel: compositeRisk >= 0.65 ? 'High Risk' : (compositeRisk >= 0.35 ? 'Moderate' : 'Low Risk'),
   }
 })
 
@@ -544,13 +549,14 @@ const activeCommunity = computed(() => {
     const gapSpark = [asthmaRisk - 2, asthmaRisk - 1, asthmaRisk - 3, asthmaRisk + 1, asthmaRisk]
     const sdohSpark = [sviScoreVal - 0.05, sviScoreVal - 0.03, sviScoreVal - 0.04, sviScoreVal - 0.01, sviScoreVal]
 
+    // Generate pronounced weekly variance trend lines based on calculated disease risk probabilities
     const trends = [
-      { date: 'Apr 1', hosp: heartDiseaseRisk - 5, util: hypertensionRisk - 4, chronic: diabetesRisk - 4, gap: asthmaRisk - 3 },
-      { date: 'Apr 8', hosp: heartDiseaseRisk - 4, util: hypertensionRisk - 3, chronic: diabetesRisk - 2, gap: asthmaRisk - 1 },
-      { date: 'Apr 15', hosp: heartDiseaseRisk - 3, util: hypertensionRisk - 4, chronic: diabetesRisk - 3, gap: asthmaRisk - 2 },
-      { date: 'Apr 22', hosp: heartDiseaseRisk - 2, util: hypertensionRisk - 1, chronic: diabetesRisk - 1, gap: asthmaRisk },
-      { date: 'Apr 29', hosp: heartDiseaseRisk - 2, util: hypertensionRisk - 2, chronic: diabetesRisk - 1, gap: asthmaRisk - 1 },
-      { date: 'May 6', hosp: heartDiseaseRisk - 1, util: hypertensionRisk - 1, chronic: diabetesRisk, gap: asthmaRisk },
+      { date: 'Apr 1', hosp: Math.max(8, heartDiseaseRisk - 14), util: Math.max(6, hypertensionRisk - 18), chronic: Math.max(10, diabetesRisk - 12), gap: Math.max(5, asthmaRisk - 15) },
+      { date: 'Apr 8', hosp: Math.max(10, heartDiseaseRisk - 8), util: Math.max(12, hypertensionRisk - 6), chronic: Math.max(8, diabetesRisk - 16), gap: Math.max(14, asthmaRisk - 5) },
+      { date: 'Apr 15', hosp: Math.max(6, heartDiseaseRisk - 16), util: Math.max(8, hypertensionRisk - 14), chronic: Math.max(15, diabetesRisk - 5), gap: Math.max(7, asthmaRisk - 18) },
+      { date: 'Apr 22', hosp: Math.max(14, heartDiseaseRisk - 4), util: Math.max(16, hypertensionRisk - 2), chronic: Math.max(11, diabetesRisk - 10), gap: Math.max(12, asthmaRisk - 8) },
+      { date: 'Apr 29', hosp: Math.max(9, heartDiseaseRisk - 11), util: Math.max(10, hypertensionRisk - 12), chronic: Math.max(18, diabetesRisk - 2), gap: Math.max(9, asthmaRisk - 13) },
+      { date: 'May 6', hosp: Math.max(13, heartDiseaseRisk - 3), util: Math.max(14, hypertensionRisk - 5), chronic: Math.max(14, diabetesRisk - 7), gap: Math.max(16, asthmaRisk - 3) },
       { date: 'May 13', hosp: heartDiseaseRisk, util: hypertensionRisk, chronic: diabetesRisk, gap: asthmaRisk }
     ]
 

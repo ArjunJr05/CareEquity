@@ -210,6 +210,14 @@ const handleAppClick = (appName) => {
   showToast('Oops!', `${appName} integration coming soon! Use "Upload File / Manual" to process records.`)
 }
 
+const defaultLocationPresets = [
+  { country: 'United States', state: 'Kansas', county: 'Trego County' },
+  { country: 'United States', state: 'Ohio', county: 'Cuyahoga County' },
+  { country: 'United States', state: 'Michigan', county: 'Wayne County' },
+  { country: 'United States', state: 'Indiana', county: 'Marion County' },
+  { country: 'United States', state: 'New York', county: 'Bronx County' }
+]
+
 const form = ref({
   name: '',
   age: '',
@@ -219,7 +227,7 @@ const form = ref({
   heart_disease: 'No',
   asthma: 'No',
   locations: [
-    { country: 'United States', state: 'Kansas', county: 'Trego County' }
+    { country: 'United States', state: '', county: '' }
   ],
   height_cm: 170,
   weight_kg: 70,
@@ -228,11 +236,7 @@ const form = ref({
 
 const addLocation = () => {
   if (form.value.locations.length < 5) {
-    form.value.locations.push({
-      country: 'United States',
-      state: 'Ohio',
-      county: US_COUNTIES_BY_STATE['Ohio'] ? US_COUNTIES_BY_STATE['Ohio'][0] : 'Cuyahoga County'
-    })
+    form.value.locations.push({ country: 'United States', state: '', county: '' })
   } else {
     showToast('Limit Reached', 'You can add a maximum of 5 locations.')
   }
@@ -246,6 +250,15 @@ const removeLocation = (index) => {
 
 const getCountiesForState = (stateName) => {
   return US_COUNTIES_BY_STATE[stateName] || ['Default County']
+}
+
+const onLocationStateChange = (loc) => {
+  const counties = getCountiesForState(loc.state)
+  if (counties && counties.length > 0) {
+    if (!counties.includes(loc.county)) {
+      loc.county = counties[0]
+    }
+  }
 }
 
 const availableCounties = computed(() => {
@@ -623,35 +636,58 @@ const handleAnalyze = async () => {
   errors.value.height_cm = !form.value.height_cm || parseFloat(form.value.height_cm) <= 0
   errors.value.weight_kg = !form.value.weight_kg || parseFloat(form.value.weight_kg) <= 0
 
-  // Check location validity (Country, State, County must all be selected)
-  const emptyLocIdx = form.value.locations.findIndex(loc => !loc.country || !loc.state || !loc.county)
-  if (emptyLocIdx !== -1) {
-    showToast('Incomplete Location', `Please select Country, State, and County for Location #${emptyLocIdx + 1}.`)
-    const locSection = document.querySelector('.target-locations-card')
-    if (locSection) locSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // Validate all location entries
+  let hasLocationErrors = false
+  form.value.locations.forEach((loc) => {
+    loc.errors = {
+      country: !loc.country,
+      state: !loc.state,
+      county: !loc.county
+    }
+    if (loc.errors.country || loc.errors.state || loc.errors.county) {
+      hasLocationErrors = true
+    }
+  })
+
+  const hasGeneralErrors = errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg
+
+  if (hasGeneralErrors || hasLocationErrors) {
+    if (errors.value.name && /\d/.test(form.value.name)) {
+      showToast('Invalid Name', 'Numbers are not allowed in the Name field.')
+    } else if (errors.value.age && (isNaN(ageVal) || ageVal <= 0)) {
+      showToast('Invalid Age', 'Please enter a valid positive age (greater than 0).')
+    } else if (hasLocationErrors) {
+      showToast('Incomplete Location', 'Please select Country, State, and County for all target location entries.')
+    } else {
+      showToast('Missing Fields', 'Please fill in all required patient demographic and clinical fields.')
+    }
+
+    const firstErr = document.querySelector('.form-field.error')
+    if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
   }
 
   // Check for duplicate locations (Same Country + State + County cannot be added twice)
   const locKeys = form.value.locations.map(l => `${(l.country||'').trim().toLowerCase()}_${(l.state||'').trim().toLowerCase()}_${(l.county||'').trim().toLowerCase()}`)
-  const hasDuplicates = new Set(locKeys).size !== locKeys.length
+  const seenKeys = new Set()
+  let hasDuplicates = false
+
+  locKeys.forEach((key, index) => {
+    if (seenKeys.has(key)) {
+      hasDuplicates = true
+      const targetLoc = form.value.locations[index]
+      if (!targetLoc.errors) targetLoc.errors = {}
+      targetLoc.errors.county = true
+      targetLoc.errors.isDuplicate = true
+    } else {
+      seenKeys.add(key)
+    }
+  })
+
   if (hasDuplicates) {
-    showToast('Duplicate Location', 'Duplicate target locations are not allowed. Please ensure each location entry is unique.')
+    showToast('Duplicate Location', 'Two target locations cannot be the same. Please select a different state or county.')
     const locSection = document.querySelector('.target-locations-card')
     if (locSection) locSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    return
-  }
-
-  if (errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg) {
-    if (errors.value.name && /\d/.test(form.value.name)) {
-      showToast('Invalid Name', 'Numbers are not allowed in the Name field.')
-    } else if (errors.value.age && (isNaN(ageVal) || ageVal <= 0)) {
-      showToast('Invalid Age', 'Please enter a valid positive age (greater than 0).')
-    } else {
-      showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and medical details.')
-    }
-    const firstErr = document.querySelector('.form-field.error')
-    if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
   }
 
@@ -951,7 +987,9 @@ const handleAnalyze = async () => {
   // Trigger Prediction Model Risk Lookup
   const predictionModelPromise = (async () => {
     try {
-      const predUrl = `${PREDICTION_BACKEND_URL}/api/v1/predict-by-coords?lat=${form.value.lat}&lon=${form.value.long}`
+      const latVal = form.value.lat !== undefined && form.value.lat !== null && form.value.lat !== '' ? form.value.lat : '41.4993'
+      const lonVal = form.value.long !== undefined && form.value.long !== null && form.value.long !== '' ? form.value.long : '-81.6944'
+      const predUrl = `${PREDICTION_BACKEND_URL}/api/v1/predict-by-coords?lat=${latVal}&lon=${lonVal}`
       const response = await fetch(predUrl)
       if (!response.ok) throw new Error('Prediction API HTTP error: ' + response.status)
       const data = await response.json()
@@ -1433,7 +1471,7 @@ const handleAnalyze = async () => {
 
                   <div class="form-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 0;">
                     <!-- Country -->
-                    <div class="form-field">
+                    <div class="form-field" :class="{ error: loc.errors?.country }">
                       <label style="font-size: 0.75rem;">Country {{ idx + 1 }} *</label>
                       <div class="select-wrapper">
                         <select v-model="loc.country" class="setup-select">
@@ -1444,25 +1482,29 @@ const handleAnalyze = async () => {
                     </div>
 
                     <!-- State -->
-                    <div class="form-field">
+                    <div class="form-field" :class="{ error: loc.errors?.state }">
                       <label style="font-size: 0.75rem;">State {{ idx + 1 }} *</label>
                       <div class="select-wrapper">
-                        <select v-model="loc.state" class="setup-select">
+                        <select v-model="loc.state" @change="onLocationStateChange(loc); loc.errors && (loc.errors.state = !loc.state)" class="setup-select">
+                          <option value="" disabled selected>Select One...</option>
                           <option v-for="st in US_STATES" :key="st" :value="st">{{ st }}</option>
                         </select>
                         <IconBase name="chevron-down" :size="13" class="chevron" />
                       </div>
+                      <span v-if="loc.errors?.state" class="err-msg">Please select state</span>
                     </div>
 
                     <!-- County -->
-                    <div class="form-field">
+                    <div class="form-field" :class="{ error: loc.errors?.county }">
                       <label style="font-size: 0.75rem;">County {{ idx + 1 }} *</label>
                       <div class="select-wrapper">
-                        <select v-model="loc.county" class="setup-select">
+                        <select v-model="loc.county" @change="loc.errors && (loc.errors.county = !loc.county, loc.errors.isDuplicate = false)" class="setup-select" :disabled="!loc.state">
+                          <option value="" disabled selected>{{ loc.state ? 'Select One...' : 'Select State First...' }}</option>
                           <option v-for="cnt in getCountiesForState(loc.state)" :key="cnt" :value="cnt">{{ cnt }}</option>
                         </select>
                         <IconBase name="chevron-down" :size="13" class="chevron" />
                       </div>
+                      <span v-if="loc.errors?.county" class="err-msg">{{ loc.errors?.isDuplicate ? 'Duplicate location - select another county' : 'Please select county' }}</span>
                     </div>
                   </div>
                 </div>

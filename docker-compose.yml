@@ -15,6 +15,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/src:/app/src
+      - ./ML:/app/ML
     restart: unless-stopped
     healthcheck:
       test:

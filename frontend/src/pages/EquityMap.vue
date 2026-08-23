@@ -296,31 +296,49 @@ const selectedCommunity = computed(() => {
 })
 
 const patientCommunity = computed(() => {
-  const avgRisk = mlPredictionResults.value?.risk_scores ? (Object.values(mlPredictionResults.value.risk_scores).reduce((a, b) => a + b, 0) / 4) : 0.5
-  const hasPred = !!predictionModelResults.value
+  let cPred = null
+  if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > 0) {
+    cPred = mlPredictionResults.value.county_predictions[0]
+  }
+
+  const ctx = cPred?.county_full_context || {}
+  const ind = cPred?.sdoh_indicator_levels || {}
   const pred = predictionModelResults.value
-  
+
+  const compRisk = mlPredictionResults.value?.overall_composite_risk_score ?? (pred?.overall_risk_score ?? 0.2416)
+  const patientEquityScore = Math.round((1 - compRisk) * 100)
+
+  const sviScore = (ctx.svi_overall ?? (pred?.overall_risk_score ?? 0.38)).toFixed(2)
+  const sviLevel = parseFloat(sviScore) > 0.7 ? 'High' : (parseFloat(sviScore) > 0.4 ? 'Medium' : 'Low')
+
+  const healthRisk = compRisk.toFixed(2)
+  const healthRiskLevel = compRisk > 0.65 ? 'High' : (compRisk > 0.35 ? 'Moderate' : 'Low')
+
+  const foodAccess = (1 - ((ctx.food_insecurity ?? (ind.food_insecurity?.value ?? 12.4)) / 25)).toFixed(2)
+  const envRisk = (1 - ((ctx.housing_insecurity ?? (ind.housing_insecurity?.value ?? 10.1)) / 20)).toFixed(2)
+  const healthcare = (1 - ((ctx.lack_health_insurance ?? (ind.lack_health_insurance?.value ?? 9.2)) / 20)).toFixed(2)
+
   return {
     id: 'patient',
     name: patientData.value.name || 'Active Patient',
-    state: hasPred ? `${pred.city}, ${pred.state}` : 'Individual Assessment',
-    population: '1 (Individual)',
-    sviScore: hasPred ? pred.overall_risk_score.toFixed(2) : '0.65',
-    sviLevel: hasPred ? pred.overall_risk_category : 'High Risk',
-    healthRisk: avgRisk.toFixed(2),
-    healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
-    foodAccess: hasPred ? pred.scores.food_security.toFixed(2) : '0.35',
-    environmental: hasPred ? pred.scores.neighborhood_environment.toFixed(2) : '0.55',
-    healthcareAccess: hasPred ? pred.scores.healthcare_access.toFixed(2) : '0.40',
-    equityScore: hasPred ? Math.round((1 - pred.overall_risk_score) * 100) : Math.round((1 - avgRisk) * 100),
-    equityLevel: hasPred ? pred.overall_risk_category : 'High Risk',
+    state: cPred ? `${cPred.location.county_name}, ${cPred.location.state}` : (pred ? `${pred.city}, ${pred.state}` : 'Cleveland, Ohio'),
+    population: ctx.population ? ctx.population.toLocaleString() : '1,245,678',
+    sviScore,
+    sviLevel,
+    healthRisk,
+    healthRiskLevel,
+    foodAccess,
+    environmental: envRisk,
+    healthcareAccess: healthcare,
+    equityScore: patientEquityScore,
+    equityLevel: compRisk > 0.65 ? 'Critical' : (compRisk > 0.35 ? 'Medium' : 'Low Risk'),
     radar: {
-      healthcare: hasPred ? Math.round(pred.scores.healthcare_access * 100) : 40,
-      social: hasPred ? Math.round(pred.scores.social_context * 100) : 60,
-      economic: hasPred ? Math.round(pred.scores.economic_stability * 100) : 58,
-      food: hasPred ? Math.round(pred.scores.food_security * 100) : 35,
-      environmental: hasPred ? Math.round(pred.scores.neighborhood_environment * 100) : 55,
-      outcomes: Math.round(avgRisk * 100)
+      healthcare: Math.round(parseFloat(healthcare) * 100),
+      social: Math.round((1 - parseFloat(sviScore)) * 100),
+      economic: Math.round(100 - (ind.poverty_rate?.value ?? 11.5) * 3),
+      food: Math.round(parseFloat(foodAccess) * 100),
+      environmental: Math.round(parseFloat(envRisk) * 100),
+      outcomes: patientEquityScore
     },
     factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
       ? mlPredictionResults.value.sdoh_barriers
