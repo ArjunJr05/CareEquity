@@ -5,8 +5,11 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field
 
-# Import ML pipeline predictor from local ML folder
-from ml_pipeline import MedicalSDOHInferencePipeline, predict
+# Import ML pipeline V3 predictor
+try:
+    from ML.ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict
+except ImportError:
+    from ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict
 
 # Global pipeline instance
 pipeline_instance = None
@@ -15,20 +18,23 @@ def get_pipeline():
     global pipeline_instance
     if pipeline_instance is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        pkl_path = os.path.join(current_dir, "ml_pipeline.pkl")
+        pkl_path = os.path.join(current_dir, "ml_pipelineV3.pkl")
+        if not os.path.exists(pkl_path):
+            pkl_path = os.path.join(os.path.dirname(current_dir), "ml_pipelineV3.pkl")
+            
         if os.path.exists(pkl_path):
-            print(f"Loading pre-trained pipeline from {pkl_path}...")
+            print(f"Loading pre-trained V3 pipeline from {pkl_path}...")
             try:
                 with open(pkl_path, "rb") as f:
                     pipeline_instance = pickle.load(f)
-                print("Successfully loaded pre-trained pipeline from .pkl!")
+                print("Successfully loaded pre-trained V3 pipeline from .pkl!")
             except Exception as e:
-                print(f"Error loading .pkl file ({e}), fitting fresh pipeline...")
-                pipeline_instance = MedicalSDOHInferencePipeline()
+                print(f"Error loading .pkl file ({e}), fitting fresh V3 pipeline...")
+                pipeline_instance = MedicalSDOHInferencePipelineV3()
                 pipeline_instance.fit()
         else:
-            print("Fitting fresh pipeline...")
-            pipeline_instance = MedicalSDOHInferencePipeline()
+            print("Fitting fresh V3 pipeline...")
+            pipeline_instance = MedicalSDOHInferencePipelineV3()
             pipeline_instance.fit()
     return pipeline_instance
 
