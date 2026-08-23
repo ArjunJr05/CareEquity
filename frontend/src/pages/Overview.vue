@@ -236,34 +236,69 @@ const activeRiskScores = computed(() => {
   }
 })
 
+const selectedLocationIdx = ref(0)
+
+const availableLocations = computed(() => {
+  const locs = []
+  if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
+    locationRecords.value.forEach(l => {
+      if (l.county || l.state || l.name) {
+        locs.push({
+          county: l.county || l.name || '',
+          state: l.state || '',
+          country: l.country || 'United States'
+        })
+      }
+    })
+  } else if (patientData.value?.locations && patientData.value.locations.length > 0) {
+    patientData.value.locations.forEach(l => {
+      locs.push({
+        county: l.county || l.name || '',
+        state: l.state || '',
+        country: l.country || 'United States'
+      })
+    })
+  } else if (patientData.value?.locations_list && patientData.value.locations_list.length > 0) {
+    patientData.value.locations_list.forEach(l => {
+      locs.push({
+        county: l[0] || '',
+        state: l[1] || '',
+        country: l[2] || 'United States'
+      })
+    })
+  } else if (patientData.value?.county || patientData.value?.state) {
+    locs.push({
+      county: patientData.value.county || '',
+      state: patientData.value.state || '',
+      country: patientData.value.country || 'United States'
+    })
+  }
+  return locs
+})
+
 const activeCommunity = computed(() => {
   if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
     const hasPred = !!predictionModelResults.value
     const pred = predictionModelResults.value
     
-    const risk = activeRiskScores.value
+    // Check if ML prediction returned county_predictions array
+    let countyPred = null
+    if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > selectedLocationIdx.value) {
+      countyPred = mlPredictionResults.value.county_predictions[selectedLocationIdx.value]
+    }
 
+    const risk = activeRiskScores.value
     const riskValues = Object.values(risk)
     const avgRisk = riskValues.reduce((a, b) => a + b, 0) / riskValues.length
     
-    // Dynamic location extraction from uploaded locationRecords, patientData, OCR or prediction model
+    // Dynamic location extraction from availableLocations using selectedLocationIdx
     let locCounty = ''
     let locState = ''
     
-    if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
-      const firstLoc = locationRecords.value[0]
-      locCounty = firstLoc.county || firstLoc.name || ''
-      locState = firstLoc.state || ''
-    }
-    
-    if (!locCounty && patientData.value) {
-      locCounty = patientData.value.county || (patientData.value.locations && patientData.value.locations[0]?.county) || ''
-      locState = patientData.value.state || (patientData.value.locations && patientData.value.locations[0]?.state) || ''
-    }
-    
-    if (!locCounty && patientData.value?.locations_list && patientData.value.locations_list.length > 0) {
-      locCounty = patientData.value.locations_list[0][0] || ''
-      locState = patientData.value.locations_list[0][1] || ''
+    if (availableLocations.value.length > 0) {
+      const activeLoc = availableLocations.value[selectedLocationIdx.value] || availableLocations.value[0]
+      locCounty = activeLoc.county
+      locState = activeLoc.state
     }
     
     if (!locCounty && ocrExtractedJson.value) {
@@ -277,11 +312,11 @@ const activeCommunity = computed(() => {
     }
 
     if (!locCounty) {
-      locCounty = "St. Mary's"
-      locState = 'Maryland'
+      locCounty = "Trego County"
+      locState = 'Kansas'
     }
 
-    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'MD'}`
+    const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'KS'}`
 
     // Calculate dynamic SDoH / environment scores
     const sviVal = hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3))
@@ -292,7 +327,7 @@ const activeCommunity = computed(() => {
     return {
       id: 'patient',
       name: displayName,
-      state: locState || 'Maryland',
+      state: locState || 'Kansas',
       population: '1 (Individual)',
       sviScore: sviVal.toFixed(2),
       sviLevel: sviVal > 0.65 ? 'High Risk' : (sviVal > 0.40 ? 'Medium' : 'Low Risk'),
@@ -796,10 +831,25 @@ const handleSendMessage = () => {
 
           <!-- Community details card -->
           <article class="card community-card" v-if="selectedCommunity">
-            <div class="community-head">
-              <div>
-                <h4 class="font-bold" style="margin: 0;">{{ selectedCommunity.name }}</h4>
-                <p v-if="selectedCommunity.state" style="margin: 2px 0 0; font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">{{ selectedCommunity.state }}</p>
+            <div class="community-head" style="display: flex; flex-direction: column; gap: 8px; align-items: flex-start; justify-content: space-between;">
+              <div style="width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div>
+                  <h4 class="font-bold" style="margin: 0;">{{ selectedCommunity.name }}</h4>
+                  <p v-if="selectedCommunity.state" style="margin: 2px 0 0; font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">{{ selectedCommunity.state }}</p>
+                </div>
+
+                <!-- Location Selector Dropdown when multiple locations provided -->
+                <div v-if="availableLocations.length > 1" class="location-select-wrapper" style="min-width: 150px;">
+                  <select 
+                    v-model="selectedLocationIdx" 
+                    class="location-dropdown-select"
+                    style="width: 100%; padding: 5px 10px; font-size: 0.78rem; font-weight: 600; color: #1e293b; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; cursor: pointer; transition: all 0.2s ease;"
+                  >
+                    <option v-for="(loc, idx) in availableLocations" :key="idx" :value="idx">
+                      📍 {{ loc.county.replace(/\s+County$/i, '') }}, {{ loc.state }}
+                    </option>
+                  </select>
+                </div>
               </div>
             </div>
             <p class="community-sub">Health Equity Score</p>

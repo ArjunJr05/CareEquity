@@ -623,15 +623,32 @@ const handleAnalyze = async () => {
   errors.value.height_cm = !form.value.height_cm || parseFloat(form.value.height_cm) <= 0
   errors.value.weight_kg = !form.value.weight_kg || parseFloat(form.value.weight_kg) <= 0
 
-  const hasInvalidLocation = !form.value.locations || form.value.locations.length === 0 || form.value.locations.some(loc => !loc.country || !loc.state || !loc.county)
+  // Check location validity (Country, State, County must all be selected)
+  const emptyLocIdx = form.value.locations.findIndex(loc => !loc.country || !loc.state || !loc.county)
+  if (emptyLocIdx !== -1) {
+    showToast('Incomplete Location', `Please select Country, State, and County for Location #${emptyLocIdx + 1}.`)
+    const locSection = document.querySelector('.target-locations-card')
+    if (locSection) locSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
 
-  if (errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg || hasInvalidLocation) {
+  // Check for duplicate locations (Same Country + State + County cannot be added twice)
+  const locKeys = form.value.locations.map(l => `${(l.country||'').trim().toLowerCase()}_${(l.state||'').trim().toLowerCase()}_${(l.county||'').trim().toLowerCase()}`)
+  const hasDuplicates = new Set(locKeys).size !== locKeys.length
+  if (hasDuplicates) {
+    showToast('Duplicate Location', 'Duplicate target locations are not allowed. Please ensure each location entry is unique.')
+    const locSection = document.querySelector('.target-locations-card')
+    if (locSection) locSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
+
+  if (errors.value.name || errors.value.age || errors.value.height_cm || errors.value.weight_kg) {
     if (errors.value.name && /\d/.test(form.value.name)) {
       showToast('Invalid Name', 'Numbers are not allowed in the Name field.')
     } else if (errors.value.age && (isNaN(ageVal) || ageVal <= 0)) {
       showToast('Invalid Age', 'Please enter a valid positive age (greater than 0).')
     } else {
-      showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and Location details.')
+      showToast('Missing Fields', 'Please fill in Patient Name, Age, Height, Weight, and medical details.')
     }
     const firstErr = document.querySelector('.form-field.error')
     if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
