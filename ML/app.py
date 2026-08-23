@@ -5,34 +5,38 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field
 
-from ml_pipelineV2 import MedicalSDOHInferencePipelineV2
+# Import ML pipeline V3 predictor
+try:
+    from ML.ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict
+except ImportError:
+    from ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict
 
-# Global pipeline V2 instance
+# Global pipeline V3 instance
 pipeline_instance = None
 
 def get_pipeline():
     global pipeline_instance
     if pipeline_instance is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        pkl_path = os.path.join(current_dir, "ml_pipelineV2.pkl")
+        pkl_path = os.path.join(current_dir, "ml_pipelineV3.pkl")
         if not os.path.exists(pkl_path):
             # Check parent workspace
-            parent_pkl = os.path.join(os.path.dirname(current_dir), "ml_pipelineV2.pkl")
+            parent_pkl = os.path.join(os.path.dirname(current_dir), "ml_pipelineV3.pkl")
             if os.path.exists(parent_pkl):
                 pkl_path = parent_pkl
         if os.path.exists(pkl_path):
-            print(f"Loading pre-trained V2 pipeline from {pkl_path}...")
+            print(f"Loading pre-trained V3 pipeline from {pkl_path}...")
             try:
                 with open(pkl_path, "rb") as f:
                     pipeline_instance = pickle.load(f)
-                print("Successfully loaded pre-trained ml_pipelineV2.pkl!")
+                print("Successfully loaded pre-trained V3 pipeline from .pkl!")
             except Exception as e:
-                print(f"Error loading V2 .pkl file ({e}), fitting fresh V2 pipeline...")
-                pipeline_instance = MedicalSDOHInferencePipelineV2()
+                print(f"Error loading V3 .pkl file ({e}), fitting fresh V3 pipeline...")
+                pipeline_instance = MedicalSDOHInferencePipelineV3()
                 pipeline_instance.fit()
         else:
-            print("Fitting fresh V2 pipeline...")
-            pipeline_instance = MedicalSDOHInferencePipelineV2()
+            print("Fitting fresh V3 pipeline...")
+            pipeline_instance = MedicalSDOHInferencePipelineV3()
             pipeline_instance.fit()
     return pipeline_instance
 
@@ -42,8 +46,8 @@ get_pipeline()
 # Initialize FastAPI App
 app = FastAPI(
     title="Medical & SDOH Disease Prediction API",
-    description="Crash-proof API predicting multi-label disease risks (Diabetes, Hypertension, Heart Disease, Asthma) and Top 3 SDOH feature drivers per county.",
-    version="1.0.0"
+    description="Crash-proof API predicting multi-label disease risks (Diabetes, Hypertension, Heart Disease, Asthma), SDoH feature levels, and County Health Equity Score.",
+    version="3.0.0"
 )
 
 # ============================================================
@@ -89,7 +93,7 @@ class PredictRequest(BaseModel):
 def root():
     return {
         "status": "online",
-        "service": "Medical & SDOH Disease Prediction API",
+        "service": "Medical & SDOH Disease Prediction API (V3)",
         "endpoints": {
             "predict": "POST /predict",
             "docs": "GET /docs"
@@ -105,45 +109,23 @@ def health_check():
 def predict_endpoint(payload: Dict[str, Any] = Body(...)):
     """
     POST /predict
-    Crash-proof endpoint for multi-label disease prediction (ml_pipelineV2.pkl).
-    Accepts raw OCR patient medical data, target_locations list-of-lists [[county, state, country]], and medical conditions.
-    Logs input JSON, model processing step, output JSON, and errors directly to docker/terminal logs.
+    Crash-proof endpoint for multi-label disease prediction (ml_pipelineV3.pkl).
+    Accepts raw OCR patient medical data, target_locations list-of-lists [[county, state, country]], and frontend location objects.
+    Logs input JSON, processing step, output JSON, and errors directly to console logs.
     """
     print("\n" + "="*80, flush=True)
-    print("📥 [ML SERVICE] RECEIVED CONSOLIDATED INPUT JSON PAYLOAD:", flush=True)
+    print("📥 [ML SERVICE V3] RECEIVED CONSOLIDATED INPUT JSON PAYLOAD:", flush=True)
     print(json.dumps(payload, indent=2), flush=True)
     print("="*80, flush=True)
 
     try:
-        print("⚙️ [ML SERVICE] Initializing ML Model Pipeline (ml_pipelineV2.pkl)...", flush=True)
+        print("⚙️ [ML SERVICE V3] Initializing ML Model Pipeline (ml_pipelineV3.pkl)...", flush=True)
         pipeline = get_pipeline()
         
-        # Handle list of lists locations [[county, state, country], ...]
-        locations = []
-        if "target_locations" in payload and isinstance(payload["target_locations"], list):
-            for loc_item in payload["target_locations"]:
-                if isinstance(loc_item, list) and len(loc_item) >= 2:
-                    county = loc_item[0]
-                    state = loc_item[1]
-                    country = loc_item[2] if len(loc_item) > 2 else "United States"
-                    locations.append({"county": county, "state": state, "country": country})
-                elif isinstance(loc_item, dict):
-                    locations.append(loc_item)
-        elif "locations" in payload and isinstance(payload["locations"], list):
-            for loc_item in payload["locations"]:
-                if isinstance(loc_item, list) and len(loc_item) >= 2:
-                    locations.append({"county": loc_item[0], "state": loc_item[1], "country": loc_item[2] if len(loc_item) > 2 else "United States"})
-                elif isinstance(loc_item, dict):
-                    locations.append(loc_item)
-                    
-        if locations:
-            payload["locations"] = locations
-            
-        print(f"🔄 [ML SERVICE] Processing prediction across {len(locations)} location(s) using ml_pipelineV2.pkl...", flush=True)
         output = pipeline.predict(payload)
         
         print("\n" + "="*80, flush=True)
-        print("📤 [ML SERVICE] GENERATED MODEL PREDICTION OUTPUT JSON:", flush=True)
+        print("📤 [ML SERVICE V3] GENERATED MODEL PREDICTION OUTPUT JSON:", flush=True)
         print(json.dumps(output, indent=2), flush=True)
         print("="*80 + "\n", flush=True)
         
