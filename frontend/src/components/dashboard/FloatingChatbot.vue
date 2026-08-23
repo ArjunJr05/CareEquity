@@ -101,6 +101,9 @@ function resolveFipsFromQuery(text) {
 
   // Known county name to FIPS lookup map
   const countyFipsMap = {
+    'st. mary': '24037',
+    'st mary': '24037',
+    'maryland': '24037',
     'cuyahoga': '39035',
     'wayne': '26163',
     'marion': '18097',
@@ -139,7 +142,7 @@ function resolveFipsFromQuery(text) {
     if (activeCounty.includes(cName)) return cFips
   }
 
-  return '53033' // King County, WA default or fallback
+  return '24037' // Default to active St. Mary's County, MD FIPS if query is generic
 }
 
 async function recordTokensConsumed(consumed) {
@@ -205,12 +208,25 @@ function handleSendMessage() {
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({ role: m.role, content: m.text }))
 
+  // Assemble multi-location context summary if user entered multiple target locations
+  let enhancedQuestion = text
+  let locSummary = []
+  if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
+    locSummary = locationRecords.value.map(l => `${l.county || l.name || ''}, ${l.state || ''}`).filter(Boolean)
+  } else if (patientData.value?.locations_list && patientData.value.locations_list.length > 0) {
+    locSummary = patientData.value.locations_list.map(l => `${l[0] || ''}, ${l[1] || ''}`).filter(Boolean)
+  }
+
+  if (locSummary.length > 0 && (text.toLowerCase().includes('environment') || text.toLowerCase().includes('area') || text.toLowerCase().includes('location') || text.toLowerCase().includes('sdoh') || text.toLowerCase().includes('county') || text.toLowerCase().includes('risk'))) {
+    enhancedQuestion += `\n[Patient Target Locations Context: ${locSummary.join(' | ')}]`
+  }
+
   fetch(ragChatUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fips: activeFips,
-      question: text,
+      question: enhancedQuestion,
       chat_history: formattedHistory
     })
   })
