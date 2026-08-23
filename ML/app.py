@@ -44,8 +44,8 @@ get_pipeline()
 # Initialize FastAPI App
 app = FastAPI(
     title="Medical & SDOH Disease Prediction API",
-    description="Crash-proof API predicting multi-label disease risks (Diabetes, Hypertension, Heart Disease, Asthma) and Top 3 SDOH feature drivers per county.",
-    version="1.0.0"
+    description="Crash-proof API predicting multi-label disease risks (Diabetes, Hypertension, Heart Disease, Asthma), SDoH feature levels, and County Health Equity Score.",
+    version="3.0.0"
 )
 
 # ============================================================
@@ -91,7 +91,7 @@ class PredictRequest(BaseModel):
 def root():
     return {
         "status": "online",
-        "service": "Medical & SDOH Disease Prediction API",
+        "service": "Medical & SDOH Disease Prediction API (V3)",
         "endpoints": {
             "predict": "POST /predict",
             "docs": "GET /docs"
@@ -104,19 +104,36 @@ def health_check():
     return {"status": "healthy", "pipeline_loaded": pipeline is not None}
 
 @app.post("/predict")
-def predict_endpoint(payload: PredictRequest = Body(...)):
+def predict_endpoint(payload: Dict[str, Any] = Body(...)):
     """
     POST /predict
-    Crash-proof endpoint for multi-label disease prediction (Diabetes, Hypertension, Heart Disease, Asthma).
-    Accepts raw OCR patient medical data and frontend-style locations (country, state, county).
+    Crash-proof endpoint for multi-label disease prediction (ml_pipelineV3.pkl).
+    Accepts raw OCR patient medical data, target_locations list-of-lists [[county, state, country]], and frontend location objects.
+    Logs input JSON, processing step, output JSON, and errors directly to console logs.
     """
+    print("\n" + "="*80, flush=True)
+    print("📥 [ML SERVICE V3] RECEIVED CONSOLIDATED INPUT JSON PAYLOAD:", flush=True)
+    print(json.dumps(payload, indent=2), flush=True)
+    print("="*80, flush=True)
+
     try:
+        print("⚙️ [ML SERVICE V3] Initializing ML Model Pipeline (ml_pipelineV3.pkl)...", flush=True)
         pipeline = get_pipeline()
-        payload_dict = payload.dict()
-        output = pipeline.predict(payload_dict)
+        
+        output = pipeline.predict(payload)
+        
+        print("\n" + "="*80, flush=True)
+        print("📤 [ML SERVICE V3] GENERATED MODEL PREDICTION OUTPUT JSON:", flush=True)
+        print(json.dumps(output, indent=2), flush=True)
+        print("="*80 + "\n", flush=True)
+        
         return output
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        error_msg = f"Prediction error: {str(e)}"
+        print("\n" + "❌"*40, flush=True)
+        print(f"❌ [ML SERVICE ERROR] {error_msg}", flush=True)
+        print("❌"*40 + "\n", flush=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn
