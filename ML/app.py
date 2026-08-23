@@ -11,7 +11,7 @@ try:
 except ImportError:
     from ml_pipelineV3 import MedicalSDOHInferencePipelineV3, predict
 
-# Global pipeline instance
+# Global pipeline V3 instance
 pipeline_instance = None
 
 def get_pipeline():
@@ -20,8 +20,10 @@ def get_pipeline():
         current_dir = os.path.dirname(os.path.abspath(__file__))
         pkl_path = os.path.join(current_dir, "ml_pipelineV3.pkl")
         if not os.path.exists(pkl_path):
-            pkl_path = os.path.join(os.path.dirname(current_dir), "ml_pipelineV3.pkl")
-            
+            # Check parent workspace
+            parent_pkl = os.path.join(os.path.dirname(current_dir), "ml_pipelineV3.pkl")
+            if os.path.exists(parent_pkl):
+                pkl_path = parent_pkl
         if os.path.exists(pkl_path):
             print(f"Loading pre-trained V3 pipeline from {pkl_path}...")
             try:
@@ -29,7 +31,7 @@ def get_pipeline():
                     pipeline_instance = pickle.load(f)
                 print("Successfully loaded pre-trained V3 pipeline from .pkl!")
             except Exception as e:
-                print(f"Error loading .pkl file ({e}), fitting fresh V3 pipeline...")
+                print(f"Error loading V3 .pkl file ({e}), fitting fresh V3 pipeline...")
                 pipeline_instance = MedicalSDOHInferencePipelineV3()
                 pipeline_instance.fit()
         else:
