@@ -212,6 +212,18 @@ const communities = {
 const selectedId = ref('cuyahoga')
 
 const activeRiskScores = computed(() => {
+  // Extract location-specific disease probabilities from V3 county_predictions if available
+  if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > selectedLocationIdx.value) {
+    const cPred = mlPredictionResults.value.county_predictions[selectedLocationIdx.value]
+    if (cPred?.diseases) {
+      return {
+        diabetes: cPred.diseases.diabetes?.probability ?? 0.5,
+        hypertension: cPred.diseases.hypertension?.probability ?? 0.5,
+        heart_disease: cPred.diseases.heart_disease?.probability ?? 0.5,
+        asthma: cPred.diseases.asthma?.probability ?? 0.5
+      }
+    }
+  }
   if (mlPredictionResults.value?.risk_scores) {
     return mlPredictionResults.value.risk_scores
   }
@@ -239,6 +251,14 @@ const activeRiskScores = computed(() => {
 const selectedLocationIdx = ref(0)
 
 const availableLocations = computed(() => {
+  // If ML V3 output returned county_predictions, use its formatted locations
+  if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > 0) {
+    return mlPredictionResults.value.county_predictions.map(cp => ({
+      county: cp.location?.county_name || 'County',
+      state: cp.location?.state || '',
+      country: 'United States'
+    }))
+  }
   const locs = []
   if (Array.isArray(locationRecords.value) && locationRecords.value.length > 0) {
     locationRecords.value.forEach(l => {
@@ -281,7 +301,7 @@ const activeCommunity = computed(() => {
     const hasPred = !!predictionModelResults.value
     const pred = predictionModelResults.value
     
-    // Check if ML prediction returned county_predictions array
+    // Check if ML V3 prediction returned county_predictions array
     let countyPred = null
     if (mlPredictionResults.value?.county_predictions && mlPredictionResults.value.county_predictions.length > selectedLocationIdx.value) {
       countyPred = mlPredictionResults.value.county_predictions[selectedLocationIdx.value]
@@ -291,11 +311,11 @@ const activeCommunity = computed(() => {
     const riskValues = Object.values(risk)
     const avgRisk = riskValues.reduce((a, b) => a + b, 0) / riskValues.length
     
-    // Dynamic location extraction from availableLocations using selectedLocationIdx
-    let locCounty = ''
-    let locState = ''
+    // Dynamic location extraction from countyPred or availableLocations
+    let locCounty = countyPred?.location?.county_name || ''
+    let locState = countyPred?.location?.state || ''
     
-    if (availableLocations.value.length > 0) {
+    if (!locCounty && availableLocations.value.length > 0) {
       const activeLoc = availableLocations.value[selectedLocationIdx.value] || availableLocations.value[0]
       locCounty = activeLoc.county
       locState = activeLoc.state
@@ -318,38 +338,55 @@ const activeCommunity = computed(() => {
 
     const displayName = locCounty.includes('County') || locCounty.includes(',') ? (locState ? `${locCounty}, ${locState}` : locCounty) : `${locCounty} County, ${locState || 'KS'}`
 
-    // Calculate dynamic SDoH / environment scores
-    const sviVal = hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3))
-    const foodAccessVal = hasPred ? pred.scores.food_security : Math.max(0.15, 0.85 - (avgRisk * 0.5))
-    const envVal = hasPred ? pred.scores.neighborhood_environment : (0.40 + (avgRisk * 0.25))
-    const healthAccessVal = hasPred ? pred.scores.healthcare_access : Math.max(0.20, 0.90 - (avgRisk * 0.4))
+    // Dynamic SDoH and Equity scores from V3 pipeline
+    const sviVal = countyPred?.county_full_context?.svi_overall ?? (hasPred ? pred.overall_risk_score : (0.45 + (avgRisk * 0.3)))
+    const foodAccessVal = countyPred?.county_full_context?.food_insecurity ? (countyPred.county_full_context.food_insecurity / 100) : (hasPred ? pred.scores.food_security : Math.max(0.15, 0.85 - (avgRisk * 0.5)))
+    const envVal = countyPred?.county_full_context?.housing_insecurity ? (countyPred.county_full_context.housing_insecurity / 100) : (hasPred ? pred.scores.neighborhood_environment : (0.40 + (avgRisk * 0.25)))
+    const healthAccessVal = countyPred?.county_full_context?.lack_health_insurance ? (countyPred.county_full_context.lack_health_insurance / 100) : (hasPred ? pred.scores.healthcare_access : Math.max(0.20, 0.90 - (avgRisk * 0.4)))
+
+    const v3EquityScore = countyPred?.county_health_equity_score ?? Math.round((1 - avgRisk) * 100)
+    const v3EquityLevel = countyPred?.county_health_equity_level ?? (avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')))
+
+    // Extract top 3 SDoH barriers across diseases from V3 county_predictions
+    let factorsList = []
+    if (countyPred?.diseases) {
+      Object.values(countyPred.diseases).forEach(d => {
+        if (d.top_3_sdoh_factors) {
+          d.top_3_sdoh_factors.forEach(f => {
+            const cleanName = f.sdoh_factor.replace(/_/g, ' ')
+            if (!factorsList.includes(cleanName)) {
+              factorsList.push(cleanName)
+            }
+          })
+        }
+      })
+    }
+    if (factorsList.length === 0) {
+      factorsList = (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
+        ? mlPredictionResults.value.sdoh_barriers
+        : ['Economic instability concerns', 'Healthcare access limitations', 'Transportation options shortage']
+    }
 
     return {
       id: 'patient',
       name: displayName,
       state: locState || 'Kansas',
-      population: '1 (Individual)',
-      sviScore: sviVal.toFixed(2),
+      population: countyPred?.county_full_context?.population ? `${countyPred.county_full_context.population.toLocaleString()}` : '1 (Individual)',
+      sviScore: typeof sviVal === 'number' ? sviVal.toFixed(2) : '0.50',
       sviLevel: sviVal > 0.65 ? 'High Risk' : (sviVal > 0.40 ? 'Medium' : 'Low Risk'),
       healthRisk: avgRisk.toFixed(2),
       healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
-      foodAccess: foodAccessVal.toFixed(2),
+      foodAccess: typeof foodAccessVal === 'number' ? foodAccessVal.toFixed(2) : '0.50',
       foodAccessLevel: foodAccessVal < 0.4 ? 'High Risk' : 'Moderate',
-      environmental: envVal.toFixed(2),
+      environmental: typeof envVal === 'number' ? envVal.toFixed(2) : '0.50',
       environmentalLevel: envVal > 0.6 ? 'High' : 'Moderate',
-      healthcareAccess: healthAccessVal.toFixed(2),
+      healthcareAccess: typeof healthAccessVal === 'number' ? healthAccessVal.toFixed(2) : '0.50',
       healthcareAccessLevel: healthAccessVal > 0.6 ? 'Good' : 'Moderate',
-      equityScore: Math.round((1 - avgRisk) * 100),
-      equityLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High Risk' : (avgRisk > 0.3 ? 'Moderate' : 'Low Risk')),
+      equityScore: v3EquityScore,
+      equityLevel: v3EquityLevel,
       center: [parseFloat(patientData.value?.lat) || 38.2917, parseFloat(patientData.value?.long) || -76.5413],
       bounds: [],
-      factors: (mlPredictionResults.value?.sdoh_barriers && mlPredictionResults.value.sdoh_barriers.length > 0)
-        ? mlPredictionResults.value.sdoh_barriers
-        : [
-            'Economic instability concerns',
-            'Healthcare access limitations',
-            'Transportation options shortage'
-          ]
+      factors: factorsList
     }
   }
   return communities[selectedId.value]
