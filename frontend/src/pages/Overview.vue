@@ -211,34 +211,37 @@ const communities = {
 
 const selectedId = ref('cuyahoga')
 
+const activeRiskScores = computed(() => {
+  if (mlPredictionResults.value?.risk_scores) {
+    return mlPredictionResults.value.risk_scores
+  }
+  if (!patientData.value) {
+    return { diabetes: 0.45, hypertension: 0.52, heart_disease: 0.28, asthma: 0.35 }
+  }
+  const ageVal = parseInt(patientData.value.age) || 45
+  const h = parseFloat(patientData.value.height_cm) || 170
+  const w = parseFloat(patientData.value.weight_kg) || 70
+  const bmiVal = w / ((h / 100) ** 2)
+  
+  const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.22) + (bmiVal > 30 ? 0.12 : 0.04) + (ageVal > 50 ? 0.08 : 0.0)
+  const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.78 : 0.28) + (ageVal > 55 ? 0.12 : 0.04)
+  const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.82 : 0.18) + (ageVal > 60 ? 0.12 : 0.04)
+  const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.68 : 0.18)
+
+  return {
+    diabetes: Math.min(0.95, Math.max(0.05, parseFloat(diabBase.toFixed(2)))),
+    hypertension: Math.min(0.95, Math.max(0.05, parseFloat(hyperBase.toFixed(2)))),
+    heart_disease: Math.min(0.95, Math.max(0.05, parseFloat(heartBase.toFixed(2)))),
+    asthma: Math.min(0.95, Math.max(0.05, parseFloat(asthmaBase.toFixed(2))))
+  }
+})
+
 const activeCommunity = computed(() => {
   if (isAnalyzed.value || (patientData.value && patientData.value.name)) {
     const hasPred = !!predictionModelResults.value
     const pred = predictionModelResults.value
     
-    // Extract multi-label disease risk probabilities from mlPredictionResults V2 or compute dynamic risk
-    let risk = { diabetes: 0.5, hypertension: 0.5, heart_disease: 0.5, asthma: 0.5 }
-    if (mlPredictionResults.value?.risk_scores) {
-      risk = mlPredictionResults.value.risk_scores
-    } else if (patientData.value) {
-      // Dynamic baseline risk score calculation based on patient age, BMI, and medical history
-      const ageVal = parseInt(patientData.value.age) || 45
-      const h = parseFloat(patientData.value.height_cm) || 170
-      const w = parseFloat(patientData.value.weight_kg) || 70
-      const bmiVal = w / ((h / 100) ** 2)
-      
-      const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.25) + (bmiVal > 30 ? 0.15 : 0.05) + (ageVal > 50 ? 0.10 : 0.0)
-      const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.80 : 0.30) + (ageVal > 55 ? 0.15 : 0.05)
-      const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.85 : 0.20) + (ageVal > 60 ? 0.15 : 0.05)
-      const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.70 : 0.20)
-
-      risk = {
-        diabetes: Math.min(0.95, Math.max(0.05, parseFloat(diabBase.toFixed(2)))),
-        hypertension: Math.min(0.95, Math.max(0.05, parseFloat(hyperBase.toFixed(2)))),
-        heart_disease: Math.min(0.95, Math.max(0.05, parseFloat(heartBase.toFixed(2)))),
-        asthma: Math.min(0.95, Math.max(0.05, parseFloat(asthmaBase.toFixed(2))))
-      }
-    }
+    const risk = activeRiskScores.value
 
     const riskValues = Object.values(risk)
     const avgRisk = riskValues.reduce((a, b) => a + b, 0) / riskValues.length
@@ -897,10 +900,10 @@ const handleSendMessage = () => {
           <p class="gap-caption">vs. National Average</p>
 
           <!-- Personal Disease Risk Predictions (from ml/system) -->
-          <div v-if="isAnalyzed && mlPredictionResults" class="personal-risk-section" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <div v-if="isAnalyzed || (patientData && patientData.name)" class="personal-risk-section" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
             <p class="popup-label" style="margin-bottom: 12px; font-weight: bold; color: var(--text-primary);">Personal Health Predictions</p>
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <div v-for="(val, disease) in mlPredictionResults.risk_scores" :key="disease" class="disease-risk-row">
+              <div v-for="(val, disease) in activeRiskScores" :key="disease" class="disease-risk-row">
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
                   <span style="text-transform: capitalize; font-weight: 600; color: var(--text-secondary);">{{ disease.replace('_', ' ') }}</span>
                   <span style="font-weight: bold; color: var(--text-primary);">{{ Math.round(val * 100) }}%</span>
