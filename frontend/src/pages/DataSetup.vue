@@ -211,26 +211,28 @@ const handleAppClick = (appName) => {
 }
 
 const defaultLocationPresets = [
-  { country: 'United States', state: 'Kansas', county: 'Trego County' },
-  { country: 'United States', state: 'Ohio', county: 'Cuyahoga County' },
-  { country: 'United States', state: 'Michigan', county: 'Wayne County' },
-  { country: 'United States', state: 'Indiana', county: 'Marion County' },
-  { country: 'United States', state: 'New York', county: 'Bronx County' }
+  { country: 'United States', state: 'Alabama', county: 'Limestone County' },
+  { country: 'United States', state: 'Georgia', county: 'Columbia County' },
+  { country: 'United States', state: 'Mississippi', county: 'Hancock County' },
+  { country: 'United States', state: 'North Carolina', county: 'Camden County' },
+  { country: 'United States', state: 'Tennessee', county: 'Rutherford County' }
 ]
 
 const form = ref({
   name: '',
   age: '',
   gender: 'Female',
-  diabetes: 'No',
-  hypertension: 'No',
-  heart_disease: 'No',
-  asthma: 'No',
+  systolic_bp: '',
+  diastolic_bp: '',
+  hba1c: '',
+  fasting_glucose: '',
+  total_cholesterol: '',
+  smoking_status: 'Never',
   locations: [
     { country: 'United States', state: '', county: '' }
   ],
-  height_cm: 170,
-  weight_kg: 70,
+  height_cm: '',
+  weight_kg: '',
   notes: ''
 })
 
@@ -344,10 +346,12 @@ const ocrExtractedFields = ref({
   name: false,
   age: false,
   gender: false,
-  diabetes: false,
-  hypertension: false,
-  heart_disease: false,
-  asthma: false,
+  systolic_bp: false,
+  diastolic_bp: false,
+  hba1c: false,
+  fasting_glucose: false,
+  total_cholesterol: false,
+  smoking_status: false,
   height_cm: false,
   weight_kg: false
 })
@@ -377,18 +381,31 @@ const checkOcrBackendHealth = async () => {
 
 const uploadFileToOCR = async (file) => {
   isUploadingFile.value = true
-  // Reset extracted fields highlight
+  // Reset extracted fields highlight & clear form
   ocrExtractedFields.value = {
     name: false,
     age: false,
     gender: false,
-    diabetes: false,
-    hypertension: false,
-    heart_disease: false,
-    asthma: false,
+    systolic_bp: false,
+    diastolic_bp: false,
+    hba1c: false,
+    fasting_glucose: false,
+    total_cholesterol: false,
+    smoking_status: false,
     height_cm: false,
     weight_kg: false
   }
+
+  // Clear fields before OCR population so non-extracted fields stay blank
+  form.value.name = ''
+  form.value.age = ''
+  form.value.systolic_bp = ''
+  form.value.diastolic_bp = ''
+  form.value.hba1c = ''
+  form.value.fasting_glucose = ''
+  form.value.total_cholesterol = ''
+  form.value.height_cm = ''
+  form.value.weight_kg = ''
 
   try {
     const formData = new FormData()
@@ -469,7 +486,23 @@ const uploadFileToOCR = async (file) => {
     // Target vitals object
     const vitalsObj = ext.vital_signs || ext.vitals || {}
 
-    // 4. Height (cm)
+    // 4. Systolic BP & Diastolic BP
+    const rawBP = vitalsObj.blood_pressure || ext.blood_pressure || ext.bp
+    if (rawBP && typeof rawBP === 'string' && rawBP.includes('/')) {
+      const parts = rawBP.split('/')
+      const sys = parseInt(parts[0].replace(/[^0-9]/g, ''), 10)
+      const dia = parseInt(parts[1].replace(/[^0-9]/g, ''), 10)
+      if (!isNaN(sys) && sys > 40 && sys < 250) {
+        form.value.systolic_bp = sys
+        ocrExtractedFields.value.systolic_bp = true
+      }
+      if (!isNaN(dia) && dia > 30 && dia < 160) {
+        form.value.diastolic_bp = dia
+        ocrExtractedFields.value.diastolic_bp = true
+      }
+    }
+
+    // 5. Height (cm)
     const rawHeight = vitalsObj.height || vitalsObj.height_cm || vitalsObj.stature
     if (rawHeight) {
       const parsedH = parseFloat(String(rawHeight).replace(/[^0-9.]/g, ''))
@@ -479,7 +512,7 @@ const uploadFileToOCR = async (file) => {
       }
     }
 
-    // 5. Weight (kg)
+    // 6. Weight (kg)
     const rawWeight = vitalsObj.weight || vitalsObj.weight_kg || vitalsObj.mass
     if (rawWeight) {
       const parsedW = parseFloat(String(rawWeight).replace(/[^0-9.]/g, ''))
@@ -489,54 +522,49 @@ const uploadFileToOCR = async (file) => {
       }
     }
 
-    // 6. Medical Conditions (Target medical_problems, clinical_context, root object, or full text)
+    // 7. Clinical Lab Numbers (HbA1c, Glucose, Cholesterol, Smoking)
     const jsonString = JSON.stringify(ext).toLowerCase()
-    
-    const checkCondition = (keys) => {
-      // 1. Check inside sub-objects (medical_problems, clinical_context, etc.) or root object
-      for (const k of keys) {
-        const val = ext[k] || (ext.medical_problems && ext.medical_problems[k]) || (ext.clinical_context && ext.clinical_context[k]) || (ext.conditions && ext.conditions[k])
-        if (val !== undefined && val !== null && val !== '') {
-          const valStr = String(val).toLowerCase().trim()
-          if (valStr.includes('yes') || valStr.includes('true') || valStr.includes('high') || valStr.includes('positive') || valStr.includes('present') || valStr.includes('diagnosed')) {
-            return true
-          }
-          const matches = valStr.match(/(\d+(\.\d+)?)\s*%?/)
-          if (matches && matches[1] && parseFloat(matches[1]) > 20) return true
-        }
+
+    // HbA1c (%)
+    const hba1cMatch = jsonString.match(/(?:hba1c|glycated|a1c)[^\d]*(\d+(?:\.\d+)?)/i)
+    if (hba1cMatch && hba1cMatch[1]) {
+      const val = parseFloat(hba1cMatch[1])
+      if (!isNaN(val) && val >= 3 && val <= 18) {
+        form.value.hba1c = val
+        ocrExtractedFields.value.hba1c = true
       }
-      // 2. Check full text JSON for key presence or percentage > 20%
-      for (const k of keys) {
-        if (jsonString.includes(k)) {
-          const reg = new RegExp(`${k}[^\\d]*(\\d+(\\.\\d+)?)\\s*%?`, 'i')
-          const m = jsonString.match(reg)
-          if (m && m[1] && parseFloat(m[1]) > 20) return true
-          if (jsonString.includes(`high ${k}`) || jsonString.includes(`${k}: yes`) || jsonString.includes(`${k}: true`) || jsonString.includes(`history of ${k}`)) {
-            return true
-          }
-        }
+    }
+
+    // Fasting Glucose (mg/dL)
+    const glucoseMatch = jsonString.match(/(?:glucose|fasting_glucose|fpg)[^\d]*(\d+(?:\.\d+)?)/i)
+    if (glucoseMatch && glucoseMatch[1]) {
+      const val = parseFloat(glucoseMatch[1])
+      if (!isNaN(val) && val >= 40 && val <= 500) {
+        form.value.fasting_glucose = Math.round(val)
+        ocrExtractedFields.value.fasting_glucose = true
       }
-      return false
     }
 
-    if (checkCondition(['diabetes', 'diabetic', 'hba1c'])) {
-      form.value.diabetes = 'Yes'
-      ocrExtractedFields.value.diabetes = true
+    // Total Cholesterol (mg/dL)
+    const cholMatch = jsonString.match(/(?:cholesterol|total_cholesterol)[^\d]*(\d+(?:\.\d+)?)/i)
+    if (cholMatch && cholMatch[1]) {
+      const val = parseFloat(cholMatch[1])
+      if (!isNaN(val) && val >= 80 && val <= 600) {
+        form.value.total_cholesterol = Math.round(val)
+        ocrExtractedFields.value.total_cholesterol = true
+      }
     }
 
-    if (checkCondition(['hypertension', 'high_blood_pressure', 'htn', 'high blood pressure'])) {
-      form.value.hypertension = 'Yes'
-      ocrExtractedFields.value.hypertension = true
-    }
-
-    if (checkCondition(['heart_disease', 'heart disease', 'coronary', 'cardiac', 'cad'])) {
-      form.value.heart_disease = 'Yes'
-      ocrExtractedFields.value.heart_disease = true
-    }
-
-    if (checkCondition(['asthma', 'asthmatic', 'airway'])) {
-      form.value.asthma = 'Yes'
-      ocrExtractedFields.value.asthma = true
+    // Smoking Status
+    if (jsonString.includes('former') || jsonString.includes('ex-smoker') || jsonString.includes('quit')) {
+      form.value.smoking_status = 'Former'
+      ocrExtractedFields.value.smoking_status = true
+    } else if (jsonString.includes('current') || jsonString.includes('smoker')) {
+      form.value.smoking_status = 'Current'
+      ocrExtractedFields.value.smoking_status = true
+    } else if (jsonString.includes('never') || jsonString.includes('non-smoker')) {
+      form.value.smoking_status = 'Never'
+      ocrExtractedFields.value.smoking_status = true
     }
 
     const countExtracted = Object.values(ocrExtractedFields.value).filter(Boolean).length
@@ -657,14 +685,33 @@ const handleAnalyze = async () => {
     } else if (errors.value.age && (isNaN(ageVal) || ageVal <= 0)) {
       showToast('Invalid Age', 'Please enter a valid positive age (greater than 0).')
     } else if (hasLocationErrors) {
-      showToast('Incomplete Location', 'Please select Country, State, and County for all target location entries.')
+      showToast('Incomplete Location', 'Please select Country, State, and County for all target location entries before analyzing.')
     } else {
-      showToast('Missing Fields', 'Please fill in all required patient demographic and clinical fields.')
+      showToast('Missing Fields', 'Please fill in required patient demographics and height/weight.')
     }
 
     const firstErr = document.querySelector('.form-field.error')
     if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
+  }
+
+  // Check for unpopulated/blank clinical lab fields
+  const unpopulatedFields = []
+  if (form.value.systolic_bp === '' || form.value.systolic_bp === null) unpopulatedFields.push('Systolic BP')
+  if (form.value.diastolic_bp === '' || form.value.diastolic_bp === null) unpopulatedFields.push('Diastolic BP')
+  if (form.value.hba1c === '' || form.value.hba1c === null) unpopulatedFields.push('HbA1c (%)')
+  if (form.value.fasting_glucose === '' || form.value.fasting_glucose === null) unpopulatedFields.push('Fasting Glucose')
+  if (form.value.total_cholesterol === '' || form.value.total_cholesterol === null) unpopulatedFields.push('Total Cholesterol')
+
+  if (unpopulatedFields.length > 0) {
+    const fieldNames = unpopulatedFields.join(', ')
+    const confirmProceed = window.confirm(
+      `The following field(s) are blank:\n• ${fieldNames}\n\nDo you want to consider them as "Don't Know (No)" and proceed with ML analysis?`
+    )
+    if (!confirmProceed) {
+      showToast('Action Cancelled', 'Please enter the missing clinical values or upload a document.')
+      return
+    }
   }
 
   // Check for duplicate locations (Same Country + State + County cannot be added twice)
@@ -808,20 +855,28 @@ const handleAnalyze = async () => {
       const weight = parseFloat(form.value.weight_kg) || 70
       const calculatedBmi = parseFloat((weight / ((height / 100) ** 2)).toFixed(1))
 
+      const sysVal = form.value.systolic_bp !== '' && form.value.systolic_bp !== null && form.value.systolic_bp !== undefined ? parseFloat(form.value.systolic_bp) : "No"
+      const diaVal = form.value.diastolic_bp !== '' && form.value.diastolic_bp !== null && form.value.diastolic_bp !== undefined ? parseFloat(form.value.diastolic_bp) : "No"
+      const hba1cVal = form.value.hba1c !== '' && form.value.hba1c !== null && form.value.hba1c !== undefined ? parseFloat(form.value.hba1c) : "No"
+      const glucoseVal = form.value.fasting_glucose !== '' && form.value.fasting_glucose !== null && form.value.fasting_glucose !== undefined ? parseFloat(form.value.fasting_glucose) : "No"
+      const cholVal = form.value.total_cholesterol !== '' && form.value.total_cholesterol !== null && form.value.total_cholesterol !== undefined ? parseFloat(form.value.total_cholesterol) : "No"
+
       const healthMetrics = {
         age: parseInt(form.value.age) || 45,
-        height_cm: height,
-        weight_kg: weight,
-        bmi: calculatedBmi,
-        blood_pressure: form.value.hypertension === 'Yes' ? '140/90' : '120/80',
-        glucose: form.value.diabetes === 'Yes' ? 165 : 95,
-        gender: form.value.gender,
-        diabetes: form.value.diabetes === 'Yes',
-        hypertension: form.value.hypertension === 'Yes',
-        heart_disease: form.value.heart_disease === 'Yes',
-        asthma: form.value.asthma === 'Yes',
-        smoking_history: 'Non-Smoker',
-        total_cholesterol_mg_dl: form.value.heart_disease === 'Yes' ? 240 : 185
+        height_cm: height || "No",
+        weight_kg: weight || "No",
+        bmi: isNaN(calculatedBmi) ? "No" : calculatedBmi,
+        systolic_bp: sysVal,
+        diastolic_bp: diaVal,
+        blood_pressure: (sysVal !== "No" && diaVal !== "No") ? `${sysVal}/${diaVal}` : "No",
+        hba1c: hba1cVal,
+        fasting_glucose: glucoseVal,
+        total_cholesterol: cholVal,
+        total_cholesterol_mg_dl: cholVal,
+        gender: form.value.gender || 'Female',
+        sex: form.value.gender || 'Female',
+        smoking_status: form.value.smoking_status || 'Never',
+        smoking_history: form.value.smoking_status || 'Never'
       }
 
       const v2Payload = {
@@ -1362,49 +1417,80 @@ const handleAnalyze = async () => {
                   </div>
                 </div>
 
-                <!-- Diabetes -->
-                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.diabetes }">
-                  <label>Diabetes *</label>
-                  <div class="select-wrapper">
-                    <select v-model="form.diabetes" class="setup-select">
-                      <option>No</option>
-                      <option>Yes</option>
-                    </select>
-                    <IconBase name="chevron-down" :size="13" class="chevron" />
-                  </div>
+                <!-- Systolic BP -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.systolic_bp }">
+                  <label>Systolic BP (mmHg) *</label>
+                  <input 
+                    type="number" 
+                    min="50" 
+                    max="250"
+                    v-model="form.systolic_bp" 
+                    placeholder="e.g., 120" 
+                    class="setup-input no-spin" 
+                  />
                 </div>
 
-                <!-- Hypertension -->
-                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.hypertension }">
-                  <label>Hypertension *</label>
-                  <div class="select-wrapper">
-                    <select v-model="form.hypertension" class="setup-select">
-                      <option>No</option>
-                      <option>Yes</option>
-                    </select>
-                    <IconBase name="chevron-down" :size="13" class="chevron" />
-                  </div>
+                <!-- Diastolic BP -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.diastolic_bp }">
+                  <label>Diastolic BP (mmHg) *</label>
+                  <input 
+                    type="number" 
+                    min="30" 
+                    max="150"
+                    v-model="form.diastolic_bp" 
+                    placeholder="e.g., 80" 
+                    class="setup-input no-spin" 
+                  />
                 </div>
 
-                <!-- Heart Disease -->
-                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.heart_disease }">
-                  <label>Heart Disease *</label>
-                  <div class="select-wrapper">
-                    <select v-model="form.heart_disease" class="setup-select">
-                      <option>No</option>
-                      <option>Yes</option>
-                    </select>
-                    <IconBase name="chevron-down" :size="13" class="chevron" />
-                  </div>
+                <!-- HbA1c (%) -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.hba1c }">
+                  <label>HbA1c (%) *</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    min="3" 
+                    max="15"
+                    v-model="form.hba1c" 
+                    placeholder="e.g., 5.7" 
+                    class="setup-input no-spin" 
+                  />
                 </div>
 
-                <!-- Asthma -->
-                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.asthma }">
-                  <label>Asthma *</label>
+                <!-- Fasting Glucose -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.fasting_glucose }">
+                  <label>Fasting Glucose (mg/dL) *</label>
+                  <input 
+                    type="number" 
+                    min="40" 
+                    max="400"
+                    v-model="form.fasting_glucose" 
+                    placeholder="e.g., 100" 
+                    class="setup-input no-spin" 
+                  />
+                </div>
+
+                <!-- Total Cholesterol -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.total_cholesterol }">
+                  <label>Total Cholesterol (mg/dL) *</label>
+                  <input 
+                    type="number" 
+                    min="80" 
+                    max="500"
+                    v-model="form.total_cholesterol" 
+                    placeholder="e.g., 190" 
+                    class="setup-input no-spin" 
+                  />
+                </div>
+
+                <!-- Smoking Status -->
+                <div class="form-field" :class="{ 'ocr-extracted': ocrExtractedFields.smoking_status }">
+                  <label>Smoking Status *</label>
                   <div class="select-wrapper">
-                    <select v-model="form.asthma" class="setup-select">
-                      <option>No</option>
-                      <option>Yes</option>
+                    <select v-model="form.smoking_status" class="setup-select">
+                      <option value="Never">Never (Never Smoked)</option>
+                      <option value="Former">Former (Used to Smoke / Quit)</option>
+                      <option value="Current">Current (Currently Smokes)</option>
                     </select>
                     <IconBase name="chevron-down" :size="13" class="chevron" />
                   </div>

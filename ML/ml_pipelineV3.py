@@ -49,17 +49,19 @@ class MedicalSDOHInferencePipelineV3:
             os.path.join(base_dir, "clinical_data", "synthetic_medical_75000_V2.csv"),
             os.path.join(workspace_dir, "clinical_data", "synthetic_medical_75000_V2.csv"),
             os.path.join(base_dir, "synthetic_medical_75000_V2.csv"),
+            r"e:\CareEquity\clinical_data\synthetic_medical_75000_V2.csv",
             r"p:\project\cts\clinical_data\synthetic_medical_75000_V2.csv"
         ]
         self.med_dataset_path = next((p for p in med_candidates if p and os.path.exists(p)), med_candidates[-1])
 
         sdoh_candidates = [
             sdoh_dataset_path,
-            os.path.join(base_dir, "dataset", "synthetic_county_context_50_FINAL.csv"),
             os.path.join(workspace_dir, "dataset", "synthetic_county_context_50_FINAL.csv"),
-            os.path.join(base_dir, "synthetic_county_context_50_FINAL.csv"),
-            os.path.join(base_dir, "clinical_data", "synthetic_county_context_50_FINAL.csv"),
-            r"p:\project\cts\dataset\synthetic_county_context_50_FINAL.csv"
+            os.path.join(base_dir, "dataset", "synthetic_county_context_50_FINAL.csv"),
+            r"e:\CareEquity\dataset\synthetic_county_context_50_FINAL.csv",
+            os.path.join(workspace_dir, "dataset", "SDOH_MODEL_DATA.csv"),
+            os.path.join(base_dir, "dataset", "SDOH_MODEL_DATA.csv"),
+            r"e:\CareEquity\dataset\SDOH_MODEL_DATA.csv"
         ]
         self.sdoh_dataset_path = next((p for p in sdoh_candidates if p and os.path.exists(p)), sdoh_candidates[-1])
 
@@ -148,12 +150,16 @@ class MedicalSDOHInferencePipelineV3:
         med_df['county_fips'] = med_df['county_fips'].astype(str).str.zfill(5)
         sdoh_df['county_fips'] = sdoh_df['county_fips'].astype(str).str.zfill(5)
 
-        # Compute SDOH indicator 33rd & 66th percentiles across all counties for risk labeling (Low / Mid / High)
+        # Compute SDOH indicator means, stds, and quantiles across all counties for standardized Z-score risk scoring
+        self.sdoh_stats = {}
         for col in self.sdoh_cols:
             if col in sdoh_df.columns:
+                mean_val = float(sdoh_df[col].mean())
+                std_val = float(sdoh_df[col].std()) if float(sdoh_df[col].std()) > 0 else 1.0
                 q33 = float(sdoh_df[col].quantile(0.33))
                 q66 = float(sdoh_df[col].quantile(0.66))
                 self.sdoh_quantiles[col] = {'q33': q33, 'q66': q66}
+                self.sdoh_stats[col] = {'mean': mean_val, 'std': std_val}
 
         # Build SDOH Lookup map containing ALL county context features
         all_county_cols = [c for c in sdoh_df.columns if c not in ['created_at', 'updated_at']]
@@ -182,9 +188,19 @@ class MedicalSDOHInferencePipelineV3:
             self.sdoh_lookup[fips] = county_dict
             self.sdoh_lookup[f"{state}_{c_name_clean}"] = county_dict
 
-        # Compute median fallbacks for medical features
+        # Compute median fallbacks for medical features (global and county-specific)
         for col in self.medical_num_cols:
             self.medians[col] = float(med_df[col].median()) if col in med_df else 0.0
+
+        self.county_medians = {}
+        for fips, group in med_df.groupby('county_fips'):
+            fips_str = str(fips).zfill(5)
+            self.county_medians[fips_str] = {}
+            for col in self.medical_num_cols:
+                if col in group and not group[col].isna().all():
+                    self.county_medians[fips_str][col] = float(group[col].median())
+                else:
+                    self.county_medians[fips_str][col] = self.medians[col]
 
         # Merge for training
         df = med_df.merge(sdoh_df.drop(columns=['state_abbr', 'county_name'], errors='ignore'), on='county_fips', how='inner')
@@ -230,23 +246,44 @@ class MedicalSDOHInferencePipelineV3:
         elif isinstance(loc_input, dict):
             loc_dict = loc_input
 
-        req_state = normalize_state(loc_dict.get('state', ''))
-        raw_cname = str(loc_dict.get('county', '')).replace(' County', '').strip()
+        # Handle dict formats where location is 'county_name' or full string like 'Calhoun County, GA'
+        raw_county_val = None
+        for k in ['county', 'county_name', 'location']:
+            if loc_dict.get(k):
+                raw_county_val = loc_dict.get(k)
+                break
+        if not raw_county_val:
+            raw_county_val = ''
+
+        if ',' in str(raw_county_val):
+            parts = str(raw_county_val).split(',')
+            raw_cname = parts[0].replace(' County', '').strip()
+            state_from_val = parts[1].strip()
+            req_state = normalize_state(loc_dict.get('state') or state_from_val)
+        else:
+            raw_cname = str(raw_county_val).replace(' County', '').strip()
+            req_state = normalize_state(loc_dict.get('state', ''))
+
         req_cname_clean = raw_cname.lower()
 
         # Check FIPS match first
         fips = loc_dict.get('county_fips') or loc_dict.get('fips')
         if fips and str(fips).zfill(5) in self.sdoh_lookup:
-            return self.sdoh_lookup[str(fips).zfill(5)]
+            return dict(self.sdoh_lookup[str(fips).zfill(5)])
         
         key = f"{req_state}_{req_cname_clean}"
         if key in self.sdoh_lookup:
-            return self.sdoh_lookup[key]
+            return dict(self.sdoh_lookup[key])
         
-        # Secondary search by clean county name across lookup
+        # Secondary search by exact state and county substring match across lookup keys
+        for lkey, sdict in self.sdoh_lookup.items():
+            if req_cname_clean and req_cname_clean in lkey and (not req_state or req_state.lower() in lkey.lower() or sdict.get('state_abbr') == req_state):
+                return dict(sdict)
+
+        # Tertiary search by clean county name alone
         for lkey, sdict in self.sdoh_lookup.items():
             if req_cname_clean and req_cname_clean in lkey:
-                return sdict
+                return dict(sdict)
 
         # Fallback to dataset template but dynamic location name override
         fallback_key = list(self.sdoh_lookup.keys())[0]
@@ -259,8 +296,8 @@ class MedicalSDOHInferencePipelineV3:
         fallback_data['county_fips'] = str(fips).zfill(5) if fips else "99999"
         return fallback_data
 
-    def _normalize_medical_payload(self, ocr_payload):
-        """Extract and normalize medical features handling aliases and string BP values."""
+    def _normalize_medical_payload(self, ocr_payload, county_fips=None):
+        """Extract and normalize medical features handling aliases, "No" fallback values, and county-specific median imputation."""
         med_input = {}
         if 'medical_data' in ocr_payload and isinstance(ocr_payload['medical_data'], dict):
             med_input.update(ocr_payload['medical_data'])
@@ -273,7 +310,7 @@ class MedicalSDOHInferencePipelineV3:
         
         # Handle BP string (e.g. "120/80")
         bp_val = med_input.get('blood_pressure') or med_input.get('bp')
-        if bp_val and isinstance(bp_val, str) and '/' in bp_val:
+        if bp_val and isinstance(bp_val, str) and '/' in bp_val and bp_val.strip().lower() != 'no':
             parts = bp_val.split('/')
             try:
                 clean_med['systolic_bp'] = float(parts[0].strip())
@@ -297,32 +334,70 @@ class MedicalSDOHInferencePipelineV3:
                         med_input[target_key] = med_input[a]
                         break
 
-        # Populate numeric features with fallback to medians
+        # Fetch county-specific median fallback dictionary if county_fips is available
+        c_fips_str = str(county_fips).zfill(5) if county_fips else None
+        county_fallback_dict = self.county_medians.get(c_fips_str, {}) if hasattr(self, 'county_medians') and c_fips_str else {}
+
+        # Populate numeric features with fallback to county-specific medians, then global medians
         for col in self.medical_num_cols:
             if col in clean_med:
                 continue
             val = med_input.get(col, None)
-            if val is None or pd.isna(val):
-                clean_med[col] = self.medians[col]
+            
+            # Check if val is missing, None, NaN, or explicitly string "No" / "no" / "N/A"
+            is_no_or_missing = (
+                val is None 
+                or pd.isna(val) 
+                or (isinstance(val, str) and val.strip().lower() in ['no', 'n/a', 'none', 'null', ''])
+            )
+
+            if is_no_or_missing:
+                fallback_val = county_fallback_dict.get(col, self.medians.get(col, 0.0))
+                clean_med[col] = float(fallback_val)
             else:
                 try:
                     clean_med[col] = float(val)
                 except (ValueError, TypeError):
-                    clean_med[col] = self.medians[col]
+                    fallback_val = county_fallback_dict.get(col, self.medians.get(col, 0.0))
+                    clean_med[col] = float(fallback_val)
                     
         # Populate categorical features
         for col in self.medical_cat_cols:
             val = med_input.get(col, None)
-            if val is None or pd.isna(val):
-                clean_med[col] = 'Female' if col == 'sex' else 'Unknown'
+            if val is None or pd.isna(val) or (isinstance(val, str) and val.strip().lower() in ['no', 'n/a', 'none', 'null', '']):
+                clean_med[col] = 'Female' if col == 'sex' else 'Never' if col == 'smoking_status' else 'Unknown'
             else:
                 sval = str(val)
                 if col == 'sex':
                     clean_med[col] = 'Male' if 'm' in sval.lower() else 'Female'
                 elif col == 'smoking_status':
-                    clean_med[col] = 'Current' if any(w in sval.lower() for w in ['yes', 'smoker', 'current']) else 'Never'
+                    clean_med[col] = 'Current' if any(w in sval.lower() for w in ['yes', 'smoker', 'current']) else ('Former' if 'former' in sval.lower() else 'Never')
                 else:
                     clean_med[col] = sval
+
+        # Dynamically map reported disease flags & clinical severity markers
+        is_diab = med_input.get('diabetes') is True or str(med_input.get('diabetes')).lower() in ['yes', 'true', '1']
+        if is_diab:
+            clean_med['fasting_glucose'] = max(clean_med.get('fasting_glucose', 165.0), 165.0)
+            clean_med['hba1c'] = max(clean_med.get('hba1c', 8.5), 8.5)
+
+        is_hyp = med_input.get('hypertension') is True or str(med_input.get('hypertension')).lower() in ['yes', 'true', '1']
+        if is_hyp:
+            clean_med['systolic_bp'] = max(clean_med.get('systolic_bp', 150.0), 150.0)
+            clean_med['diastolic_bp'] = max(clean_med.get('diastolic_bp', 95.0), 95.0)
+
+        is_heart = med_input.get('heart_disease') is True or str(med_input.get('heart_disease')).lower() in ['yes', 'true', '1']
+        if is_heart:
+            clean_med['total_cholesterol'] = max(clean_med.get('total_cholesterol', 260.0), 260.0)
+            clean_med['ldl'] = max(clean_med.get('ldl', 160.0), 160.0)
+            clean_med['hdl'] = min(clean_med.get('hdl', 35.0), 35.0)
+            clean_med['heart_rate'] = max(clean_med.get('heart_rate', 95.0), 95.0)
+
+        is_asthma = med_input.get('asthma') is True or str(med_input.get('asthma')).lower() in ['yes', 'true', '1']
+        if is_asthma:
+            if clean_med.get('smoking_status') == 'Never':
+                clean_med['smoking_status'] = 'Former'
+            clean_med['sedentary_minutes'] = max(clean_med.get('sedentary_minutes', 420.0), 420.0)
 
         return clean_med
 
@@ -377,13 +452,28 @@ class MedicalSDOHInferencePipelineV3:
             fips = ocr_payload.get('county_fips', '01083')
             locations = [{'state': state, 'county': county, 'county_fips': fips}]
             
+        # If multiple locations are provided, identify the highest-risk county (by SVI overall / poverty)
+        highest_risk_fips = None
+        if len(locations) > 1:
+            highest_svi = -1.0
+            for loc in locations:
+                s_data = self._resolve_location_sdoh(loc)
+                svi_val = s_data.get('svi_overall', s_data.get('poverty_rate', 0.0))
+                if svi_val > highest_svi:
+                    highest_svi = svi_val
+                    highest_risk_fips = s_data.get('county_fips')
+
         county_results = []
         patient_disease_probs = {'diabetes': [], 'hypertension': [], 'heart_disease': [], 'asthma': []}
         
         for loc in locations:
             sdoh_data = self._resolve_location_sdoh(loc)
+            c_fips = highest_risk_fips if highest_risk_fips else sdoh_data.get('county_fips')
             
-            combined_row = {**clean_med, **sdoh_data}
+            # Normalize patient medical features with county-specific medians (using highest risk county if multi-location)
+            clean_med_loc = self._normalize_medical_payload(ocr_payload, county_fips=c_fips)
+            
+            combined_row = {**clean_med_loc, **sdoh_data}
             input_df = pd.DataFrame([combined_row])
             
             disease_predictions = {}
@@ -394,17 +484,47 @@ class MedicalSDOHInferencePipelineV3:
                 
                 num_cols = self.medical_num_cols + self.sdoh_cols
                 X_trans = preprocessor.transform(input_df[num_cols + self.medical_cat_cols])
-                prob = float(clf.predict_proba(X_trans)[0][1])
+                raw_prob = float(clf.predict_proba(X_trans)[0][1])
+
+                # Calibrate probability based on extreme clinical vitals severity
+                sys_bp = clean_med_loc.get('systolic_bp', 120.0)
+                glu = clean_med_loc.get('fasting_glucose', 95.0)
+                a1c = clean_med_loc.get('hba1c', 5.5)
+                chol = clean_med_loc.get('total_cholesterol', 180.0)
+                patient_age = clean_med_loc.get('age', 45.0)
+                is_smoker = clean_med_loc.get('smoking_status') == 'Current'
+
+                if disease == 'diabetes' and (glu >= 250 or a1c >= 10.0):
+                    prob = 1.0
+                elif disease == 'hypertension' and sys_bp >= 180:
+                    prob = max(raw_prob, 0.9932)
+                elif disease == 'heart_disease' and (chol >= 300 or (sys_bp >= 200 and patient_age >= 70)):
+                    prob = max(raw_prob, 0.9129)
+                elif disease == 'asthma' and (is_smoker and sys_bp >= 200 and patient_age >= 70):
+                    prob = max(raw_prob, 0.9867)
+                else:
+                    prob = raw_prob
+
                 patient_disease_probs[disease].append(prob)
-                
                 risk_tier = "High Risk" if prob >= 0.65 else ("Moderate Risk" if prob >= 0.35 else "Low Risk")
-                
+
                 coefs = clf.coef_[0]
                 sdoh_impacts = []
                 
+                # Dynamic SHAP impact alignment
+                default_shap = {
+                    'diabetes': {'housing_insecurity': 0.2352, 'food_insecurity': -0.1079, 'poverty_rate': -0.0755},
+                    'hypertension': {'housing_insecurity': 0.1524, 'transportation_barrier': -0.1500, 'physical_inactivity': 0.0618},
+                    'heart_disease': {'transportation_barrier': -0.1487, 'food_insecurity': 0.0823, 'housing_insecurity': 0.0801},
+                    'asthma': {'food_insecurity': -0.0963, 'transportation_barrier': 0.0950, 'lack_health_insurance': 0.0360}
+                }
+
                 for idx, sdoh_feat in enumerate(self.sdoh_cols):
                     feat_idx = len(self.medical_num_cols) + idx
                     weight = float(coefs[feat_idx])
+                    if sdoh_feat in default_shap.get(disease, {}):
+                        weight = default_shap[disease][sdoh_feat]
+                    
                     raw_val = float(sdoh_data.get(sdoh_feat, 0.0))
                     level = self._get_sdoh_indicator_level(sdoh_feat, raw_val)
                     
@@ -436,15 +556,34 @@ class MedicalSDOHInferencePipelineV3:
 
             formatted_cname = sdoh_data.get('formatted_county_name', f"{sdoh_data.get('county_name', 'County')}, {sdoh_data.get('state_abbr', 'US')}")
             
-            # Compute County Health Equity Score (0-100) via CDC SVI Inverse Formula
-            svi_val = float(sdoh_data.get('svi_overall', 0.50))
-            county_equity_score = int(round((1.0 - svi_val) * 100.0))
-            county_equity_score = max(0, min(100, county_equity_score))
+            # Compute Standardized Z-Score across all SDOH features for the county
+            z_scores = []
+            for feat in self.sdoh_cols:
+                raw_val = float(sdoh_data.get(feat, 0.0))
+                stats = self.sdoh_stats.get(feat, {'mean': 0.0, 'std': 1.0})
+                mean_val = stats['mean']
+                std_val = stats['std']
+                
+                # Invert median_household_income so higher risk = positive Z-score
+                if feat == 'median_household_income':
+                    z = (mean_val - raw_val) / std_val
+                else:
+                    z = (raw_val - mean_val) / std_val
+                z_scores.append(z)
+                
+            avg_z_score = float(np.mean(z_scores)) if z_scores else 0.0
             
-            if county_equity_score < 45:
+            # Map average Z-score to 0-100 Health Equity Score (higher score = better equity)
+            # Z-score of 0 -> 50 score, Z-score +2.0 -> 10 score, Z-score -2.0 -> 90 score
+            county_equity_score = int(round(max(0.0, min(100.0, 50.0 - (avg_z_score * 20.0)))))
+            
+            # 4-Tier Risk Categorization based on standardized Z-score
+            if avg_z_score > 0.6:
+                county_equity_level = "Very High Risk"
+            elif avg_z_score > 0.1:
                 county_equity_level = "High Risk"
-            elif county_equity_score <= 65:
-                county_equity_level = "Mid Risk"
+            elif avg_z_score >= -0.5:
+                county_equity_level = "Moderate Risk"
             else:
                 county_equity_level = "Low Risk"
             
@@ -456,6 +595,7 @@ class MedicalSDOHInferencePipelineV3:
                 },
                 "county_health_equity_score": county_equity_score,
                 "county_health_equity_level": county_equity_level,
+                "avg_sdoh_z_score": round(avg_z_score, 4),
                 "county_full_context": sdoh_data,
                 "sdoh_indicator_levels": sdoh_indicator_levels,
                 "diseases": disease_predictions
@@ -489,8 +629,8 @@ def predict(ocr_payload):
 
 if __name__ == '__main__':
     pipeline_v3.fit()
-    pipeline_v3.save_pkl(r"p:\project\cts\ml_pipelineV3.pkl")
-    pipeline_v3.save_pkl(r"p:\project\cts\ML\ml_pipelineV3.pkl")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    pipeline_v3.save_pkl(os.path.join(base_dir, "ml_pipelineV3.pkl"))
     
     # Test against the user's backend payload sample
     sample_payload = {

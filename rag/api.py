@@ -632,18 +632,15 @@ import re as _re
 )
 def chat_with_bot(req: ChatRequest):
     """
-    The central chatbot endpoint.  Accepts a FIPS code, a question, and
+    The central chatbot endpoint. Accepts a FIPS code, a question, and
     optional prior chat history.
-
-    Internally:
-      1. Calls _assemble_county_context() to build the full county context
-         from CSV data + Neo4j severity labels.
-      2. Passes the context + question to ask_bot() in bot.py.
-      3. Returns the formatted answer plus metadata.
-
-    This means the Streamlit frontend only needs ONE POST call per user
-    message — all data assembly happens server-side.
     """
+    import json
+    print("\n" + "="*80, flush=True)
+    print("📥 [RAG BACKEND] RECEIVED CHAT INGEST JSON:", flush=True)
+    print(json.dumps(req.model_dump(), indent=2), flush=True)
+    print("="*80, flush=True)
+
     fips     = req.fips.strip()
     question = req.question.strip()
 
@@ -677,7 +674,7 @@ def chat_with_bot(req: ChatRequest):
         r"pubmed\.ncbi\.nlm\.nih\.gov/(\d+)", answer
     )))
 
-    return ChatResponse(
+    resp = ChatResponse(
         fips         = fips,
         question     = question,
         answer       = answer,
@@ -685,3 +682,10 @@ def chat_with_bot(req: ChatRequest):
         sources_used = sources_used,
         tokens_used  = tokens_used,
     )
+
+    print("\n" + "="*80, flush=True)
+    print("📤 [RAG BACKEND] GENERATED CHAT RESPONSE JSON:", flush=True)
+    print(json.dumps(resp.model_dump(), indent=2), flush=True)
+    print("="*80 + "\n", flush=True)
+
+    return resp
