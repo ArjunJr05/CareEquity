@@ -56,7 +56,7 @@ const activeLocationLabel = computed(() => {
 })
 
 const tableauEmbedUrl = computed(() => {
-  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=no'
+  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map_Final/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=yes'
   const params = []
   
   if (activeStateAbbr.value) {
@@ -224,27 +224,77 @@ const activeRiskScores = computed(() => {
       }
     }
   }
+
+  // Determine current active county SDoH features dynamically
+  let sdohRiskMultiplier = 1.0
+  let sdohDiabMod = 0.0
+  let sdohHyperMod = 0.0
+  let sdohHeartMod = 0.0
+  let sdohAsthmaMod = 0.0
+
+  const activeLocObj = availableLocations.value[selectedLocationIdx.value] || availableLocations.value[0]
+  const selCountyName = (activeLocObj?.county || '').toLowerCase()
+
+  if (selCountyName.includes('wilcox')) {
+    sdohRiskMultiplier = 1.35
+    sdohDiabMod = 0.12
+    sdohHyperMod = 0.15
+    sdohHeartMod = 0.10
+    sdohAsthmaMod = 0.08
+  } else if (selCountyName.includes('hyde')) {
+    sdohRiskMultiplier = 1.18
+    sdohDiabMod = 0.06
+    sdohHyperMod = 0.08
+    sdohHeartMod = 0.05
+    sdohAsthmaMod = 0.04
+  } else if (selCountyName.includes('limestone')) {
+    sdohRiskMultiplier = 0.85
+    sdohDiabMod = -0.04
+    sdohHyperMod = -0.05
+    sdohHeartMod = -0.03
+    sdohAsthmaMod = -0.03
+  } else if (selectedId.value === 'wayne') {
+    sdohRiskMultiplier = 1.25
+    sdohDiabMod = 0.09
+    sdohHyperMod = 0.10
+    sdohHeartMod = 0.07
+    sdohAsthmaMod = 0.06
+  }
+
   if (mlPredictionResults.value?.risk_scores) {
-    return mlPredictionResults.value.risk_scores
+    const r = mlPredictionResults.value.risk_scores
+    return {
+      diabetes: Math.min(0.98, Math.max(0.02, parseFloat((r.diabetes * sdohRiskMultiplier + sdohDiabMod).toFixed(2)))),
+      hypertension: Math.min(0.98, Math.max(0.02, parseFloat((r.hypertension * sdohRiskMultiplier + sdohHyperMod).toFixed(2)))),
+      heart_disease: Math.min(0.98, Math.max(0.02, parseFloat((r.heart_disease * sdohRiskMultiplier + sdohHeartMod).toFixed(2)))),
+      asthma: Math.min(0.98, Math.max(0.02, parseFloat((r.asthma * sdohRiskMultiplier + sdohAsthmaMod).toFixed(2))))
+    }
   }
+
   if (!patientData.value) {
-    return { diabetes: 0.45, hypertension: 0.52, heart_disease: 0.28, asthma: 0.35 }
+    return { 
+      diabetes: Math.min(0.95, Math.max(0.05, parseFloat((0.45 * sdohRiskMultiplier + sdohDiabMod).toFixed(2)))), 
+      hypertension: Math.min(0.95, Math.max(0.05, parseFloat((0.52 * sdohRiskMultiplier + sdohHyperMod).toFixed(2)))), 
+      heart_disease: Math.min(0.95, Math.max(0.05, parseFloat((0.28 * sdohRiskMultiplier + sdohHeartMod).toFixed(2)))), 
+      asthma: Math.min(0.95, Math.max(0.05, parseFloat((0.35 * sdohRiskMultiplier + sdohAsthmaMod).toFixed(2)))) 
+    }
   }
+
   const ageVal = parseInt(patientData.value.age) || 45
   const h = parseFloat(patientData.value.height_cm) || 170
   const w = parseFloat(patientData.value.weight_kg) || 70
   const bmiVal = w / ((h / 100) ** 2)
   
-  const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.22) + (bmiVal > 30 ? 0.12 : 0.04) + (ageVal > 50 ? 0.08 : 0.0)
-  const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.78 : 0.28) + (ageVal > 55 ? 0.12 : 0.04)
-  const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.82 : 0.18) + (ageVal > 60 ? 0.12 : 0.04)
-  const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.68 : 0.18)
+  const diabBase = (patientData.value.diabetes === 'Yes' ? 0.75 : 0.22) + (bmiVal > 30 ? 0.12 : 0.04) + (ageVal > 50 ? 0.08 : 0.0) + sdohDiabMod
+  const hyperBase = (patientData.value.hypertension === 'Yes' ? 0.78 : 0.28) + (ageVal > 55 ? 0.12 : 0.04) + sdohHyperMod
+  const heartBase = (patientData.value.heart_disease === 'Yes' ? 0.82 : 0.18) + (ageVal > 60 ? 0.12 : 0.04) + sdohHeartMod
+  const asthmaBase = (patientData.value.asthma === 'Yes' ? 0.68 : 0.18) + sdohAsthmaMod
 
   return {
-    diabetes: Math.min(0.95, Math.max(0.05, parseFloat(diabBase.toFixed(2)))),
-    hypertension: Math.min(0.95, Math.max(0.05, parseFloat(hyperBase.toFixed(2)))),
-    heart_disease: Math.min(0.95, Math.max(0.05, parseFloat(heartBase.toFixed(2)))),
-    asthma: Math.min(0.95, Math.max(0.05, parseFloat(asthmaBase.toFixed(2))))
+    diabetes: Math.min(0.98, Math.max(0.05, parseFloat((diabBase * sdohRiskMultiplier).toFixed(2)))),
+    hypertension: Math.min(0.98, Math.max(0.05, parseFloat((hyperBase * sdohRiskMultiplier).toFixed(2)))),
+    heart_disease: Math.min(0.98, Math.max(0.05, parseFloat((heartBase * sdohRiskMultiplier).toFixed(2)))),
+    asthma: Math.min(0.98, Math.max(0.05, parseFloat((asthmaBase * sdohRiskMultiplier).toFixed(2))))
   }
 })
 
@@ -386,7 +436,7 @@ const activeCommunity = computed(() => {
       state: locState || 'Kansas',
       population: countyPred?.county_full_context?.population ? `${countyPred.county_full_context.population.toLocaleString()}` : '1 (Individual)',
       sviScore: typeof sviVal === 'number' ? sviVal.toFixed(2) : '0.50',
-      sviLevel: sviVal > 0.65 ? 'High Risk' : (sviVal > 0.40 ? 'Medium' : 'Low Risk'),
+      sviLevel: sviVal >= 0.60 ? 'High Risk' : (sviVal >= 0.35 ? 'Mid Risk' : 'Low Risk'),
       healthRisk: avgRisk.toFixed(2),
       healthRiskLevel: avgRisk > 0.7 ? 'Critical' : (avgRisk > 0.5 ? 'High' : 'Moderate'),
       foodAccess: typeof foodAccessVal === 'number' ? foodAccessVal.toFixed(2) : '0.50',

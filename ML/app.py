@@ -17,6 +17,8 @@ pipeline_instance = None
 def get_pipeline():
     global pipeline_instance
     if pipeline_instance is None:
+        import sys
+        sys.modules['__main__'].MedicalSDOHInferencePipelineV3 = MedicalSDOHInferencePipelineV3
         current_dir = os.path.dirname(os.path.abspath(__file__))
         pkl_path = os.path.join(current_dir, "ml_pipelineV3.pkl")
         if not os.path.exists(pkl_path):

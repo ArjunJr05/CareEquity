@@ -210,6 +210,11 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     and top K SDoH risk factors affecting the specified county.
     Automatically falls back to rich dataset when Neo4j is offline.
     """
+    import json
+    print("\n" + "="*80, flush=True)
+    print(f"📥 [KG BACKEND] REQUESTED GRAPH QUERY FOR COUNTY FIPS: '{fips}' (top_k: {top_k})", flush=True)
+    print("="*80, flush=True)
+
     if df_csv is None or df_csv.empty:
         raise HTTPException(status_code=500, detail="County dataset not loaded.")
 
@@ -446,12 +451,19 @@ def get_county_graph(fips: str, top_k: int = Query(10, ge=1, le=20)):
     nodes_formatted = [NodeModel(**n) for n in nodes_dict.values()]
     edges_formatted = [EdgeModel(**e) for e in edges_list]
 
-    return GraphResponse(
+    resp = GraphResponse(
         fips=str(fips),
         county_name=county_name,
         nodes=nodes_formatted,
         edges=edges_formatted
     )
+
+    print("\n" + "="*80, flush=True)
+    print("📤 [KG BACKEND] GENERATED KNOWLEDGE GRAPH JSON RESPONSE:", flush=True)
+    print(json.dumps(resp.model_dump(), indent=2), flush=True)
+    print("="*80 + "\n", flush=True)
+
+    return resp
 
 
 @app.get("/api/county/{fips}/sdoh", response_model=List[SDoHBarrierItem], tags=["SDoH Factors"])

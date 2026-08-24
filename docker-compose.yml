@@ -11,11 +11,37 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:CareEquity2026@caredb.cxcssmmegdh1.ap-south-2.rds.amazonaws.com:5432/caredb}
       RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-backend:8000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/src:/app/src
       - ./ML:/app/ML
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ml-backend:
+    build:
+      context: ./ML
+      dockerfile: Dockerfile
+    container_name: careequity-ml-backend
+    ports:
+      - "8006:8000"
+    volumes:
+      - ./ML:/app
+      - ./dataset:/app/dataset
+      - ./dataset:/dataset
     restart: unless-stopped
     healthcheck:
       test:

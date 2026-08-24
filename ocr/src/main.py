@@ -252,11 +252,23 @@ async def extract_from_document(
         # Run extraction
         # ====================================================
 
+        print("\n" + "="*80, flush=True)
+        print(f"📥 [OCR BACKEND] PROCESSING DOCUMENT FILE: {file.filename} (Format: {file_format}, Ext: {extension})", flush=True)
+        print("="*80, flush=True)
+
         result = extract(
             temp_path,
             file_format,
             use_adaptive_preprocessing=True,
         )
+
+        extracted_dict = result.to_dict()
+
+        print("\n" + "="*80, flush=True)
+        print("📤 [OCR BACKEND] EXTRACTED PATIENT & SDOH JSON OUTPUT:", flush=True)
+        import json
+        print(json.dumps(extracted_dict, indent=2, default=str), flush=True)
+        print("="*80 + "\n", flush=True)
 
 
         # ====================================================
@@ -320,7 +332,7 @@ async def extract_from_document(
                     datetime.now().isoformat()
                 ),
 
-                "data": result.to_dict(),
+                "data": extracted_dict,
 
                 "extraction_metadata": {
 

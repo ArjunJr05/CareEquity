@@ -55,7 +55,7 @@ const isFullscreen = ref(false)
 const isVizLoading = ref(true)
 
 const tableauEmbedUrl = computed(() => {
-  const baseUrl = 'https://public.tableau.com/views/CareEquity_Map/Sheet2?:showVizHome=no&:embed=true&:toolbar=no&:tabs=no&:animate_transition=yes&:display_static_image=no'
+  const baseUrl = 'https://public.tableau.com/app/profile/harish.r2464/viz/CareEquity_Map_Final/Sheet2?publish=yes'
   const params = []
   
   if (activeStateAbbr.value) {
@@ -68,7 +68,7 @@ const tableauEmbedUrl = computed(() => {
   return params.length > 0 ? `${baseUrl}&${params.join('&')}` : baseUrl
 })
 
-const tableauPublicUrl = 'https://public.tableau.com/app/profile/harish.r2464/viz/CareEquity_Map/Sheet2?publish=yes'
+const tableauPublicUrl = 'https://public.tableau.com/app/profile/harish.r2464/viz/CareEquity_Map_Final/Sheet2?publish=yes'
 
 function reloadTableau() {
   isVizLoading.value = true

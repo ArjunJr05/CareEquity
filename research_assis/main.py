@@ -193,9 +193,21 @@ def analyze_patient(risk_case: RiskCase):
     Execute parallel multi-agent SDOH analysis and live web disease surveillance.
     Returns comprehensive clinical report, evidence-based interventions, and localized resources.
     """
+    import json
+    print("\n" + "="*80, flush=True)
+    print(f"📥 [AGENT BACKEND] RECEIVED PATIENT CASE JSON FOR ANALYSIS (ID: {risk_case.case_id}):", flush=True)
+    print(json.dumps(risk_case.model_dump(), indent=2), flush=True)
+    print("="*80, flush=True)
+
     logger.info(f"Received analysis request for case: {risk_case.case_id} (Location: {risk_case.geography})")
     try:
         report = run_sdoh_analysis(risk_case)
+
+        print("\n" + "="*80, flush=True)
+        print(f"📤 [AGENT BACKEND] GENERATED MULTI-AGENT SYNTHESIS REPORT JSON FOR CASE {risk_case.case_id}:", flush=True)
+        print(json.dumps(report.model_dump(), indent=2, default=str), flush=True)
+        print("="*80 + "\n", flush=True)
+
         return report
     except Exception as e:
         logger.error(f"Error during analysis for case {risk_case.case_id}: {e}", exc_info=True)
